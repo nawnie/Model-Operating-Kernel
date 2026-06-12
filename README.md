@@ -1,14 +1,14 @@
 # Model Operating Kernel (MOK)
 
-> A new multi-model architecture for building one usable AI system out of several specialized models: a core coordinator plus expert models for instruct, coding, vision, tools, memory, and future domains.
+> A multi-model runtime architecture for building one usable AI system out of several specialized models: a resident core coordinator plus expert models for instruction, coding, vision, tools, memory, reasoning, and future domains.
 
-**Model Operating Kernel (MOK)** is not the Atlas adapter project, not a LoRA-only router, and not a normal AI agent wrapper. This repository starts a new architecture: a runtime that makes multiple models behave like one coordinated model system.
+**Model Operating Kernel (MOK)** is a new architecture for making multiple models behave like one coordinated model system. It is a runtime layer for split loading, offloading, routing, and resource budgeting across independent model assets.
 
 The first goal is simple and concrete:
 
 > **Build a working local model system that can load, offload, route, and coordinate multiple expert models under constrained hardware.**
 
-A traditional Mixture-of-Experts model usually routes between experts inside one trained model. MOK explores a runtime-level version of that idea: separate specialist models are treated as swappable expert modules managed by a core process.
+A traditional Mixture-of-Experts model routes between experts inside one trained model. MOK explores a runtime-level version of that idea: separate specialist models are treated as managed expert assets coordinated by a core process.
 
 ---
 
@@ -21,11 +21,12 @@ A MOK system has three major parts:
    - Understands the user request.
    - Decides which expert model is needed.
    - Maintains task state and final response control.
+   - Should usually stay `resident` in VRAM.
 
 2. **Expert model pool**
    - Specialist models for different capabilities.
    - Initial targets: instruct, coding, vision, reasoning, tool use, and memory/retrieval.
-   - Experts may be local LLMs, VLMs, adapters, quantized models, or external backend processes.
+   - Experts may be local LLMs, VLMs, quantized models, adapters, or external backend processes.
 
 3. **Load/offload manager**
    - Keeps the system inside hardware limits.
@@ -33,7 +34,7 @@ A MOK system has three major parts:
    - Offloads inactive experts.
    - Tracks RAM, VRAM, cache state, and route cost.
 
-The point is not to prove a name. The point is to make a working model-of-models runtime.
+The point is to make a working model-of-models runtime.
 
 ---
 
@@ -43,7 +44,7 @@ Local AI systems are becoming more capable, but they are still awkward when one 
 
 A strong coding model may be weak at vision. A vision model may be weak at long instruction following. A small instruct model may be fast but unable to handle deep code. A large model may be powerful but too expensive to keep loaded all the time on a 16GB GPU.
 
-MOK is meant to solve that at the runtime level.
+MOK solves that at the runtime level.
 
 Instead of forcing one model to do everything, MOK treats models like managed compute resources:
 
@@ -53,7 +54,7 @@ Instead of forcing one model to do everything, MOK treats models like managed co
 - pass structured state between experts
 - prevent VRAM crashes
 - measure routing and load costs
-- eventually make the system feel like one coherent model
+- make the system feel like one coherent model
 
 ---
 
@@ -61,7 +62,7 @@ Instead of forcing one model to do everything, MOK treats models like managed co
 
 MOK is a **runtime-level MoE-style architecture**.
 
-It is designed to coordinate multiple independent models as if they were expert regions of one larger system.
+It coordinates multiple independent models as if they were expert regions of one larger system.
 
 Examples:
 
@@ -82,15 +83,12 @@ This is related to Mixture-of-Experts in spirit, but it is not limited to one tr
 
 MOK is **not**:
 
-- the Atlas adapter project
 - a LoRA-only adapter router
 - a prompt-chain framework
 - a chatbot personality system
 - a LangChain clone
 - a research note pretending to be a product
 - a wrapper that assumes unlimited GPU memory
-
-Some early scaffold code may still contain names from prior experiments. Those should be cleaned up as the repo moves toward the actual MOK runtime.
 
 ---
 
@@ -139,15 +137,16 @@ The first milestone is not a whitepaper. It is a minimal working MOK runtime.
 
 Build a prototype that can:
 
-1. Start a lightweight core coordinator.
+1. Start or simulate a lightweight core coordinator.
 2. Register multiple expert models in a model registry.
 3. Accept a prompt through an API or CLI.
 4. Decide whether the request needs core, coder, instruct, vision, or another expert.
-5. Load the selected expert if it is not active.
-6. Offload inactive experts when memory limits require it.
-7. Run the expert.
-8. Return the result through the core coordinator.
-9. Log route, load time, offload time, memory pressure, and final result status.
+5. Check the memory budget before promoting an expert.
+6. Load the selected expert if it is not active.
+7. Offload inactive experts when memory limits require it.
+8. Run the expert or mock backend.
+9. Return the result through the core coordinator.
+10. Log route, load time, offload time, memory pressure, and final result status.
 
 ### Initial expert set
 
@@ -163,22 +162,26 @@ The exact models can change. The architecture should not depend on one model nam
 
 ---
 
-## Load and offload strategy
+## Model lifecycle states
 
-MOK should treat models as resources with lifecycle states.
+MOK tracks models as assets with explicit hardware lifecycle states:
 
-```text
-unloaded -> staged -> loaded -> active -> idle -> offloaded
-```
+| State | Meaning |
+|---|---|
+| `offline` | On disk only. Not staged in RAM or resident in VRAM. |
+| `staged` | Paged or prepared in system RAM. Ready for faster promotion. |
+| `resident` | Permanently held in VRAM. Reserved for the core coordinator. |
+| `active` | In VRAM and currently executing. |
+| `idle` | In VRAM but waiting. Eligible for eviction under pressure. |
 
 ### Required manager behavior
 
 - Know which models are available.
-- Know which models are currently loaded.
+- Know which models are currently in RAM or VRAM.
 - Know estimated RAM/VRAM cost per model.
 - Load only what is needed.
 - Offload least-needed models first.
-- Prefer keeping the core coordinator alive.
+- Preserve the resident core coordinator.
 - Avoid crashing the GPU by crossing hard memory limits.
 - Record every load/offload event.
 
@@ -188,27 +191,25 @@ This is the heart of the project.
 
 ## Current repository status
 
-**Status:** early scaffold / direction correction  
+**Status:** early MOK runtime scaffold  
 **Goal:** working multi-model MOK prototype  
 **Hardware target:** local consumer hardware, especially 16GB VRAM systems  
 **Primary concern:** split loading, offloading, routing, and coordination
 
-The current codebase is only a starting scaffold. Some names and files may still reflect older adapter-routing experiments. Those should be renamed or replaced as the MOK runtime becomes real.
+The current codebase contains the first MOK-native core pieces:
+
+- `src/mok/models/registry.py`
+- `src/mok/memory/budget.py`
+- `tests/test_model_registry.py`
+- `tests/test_memory_budget.py`
 
 ---
 
 ## Near-term build plan
 
-### Phase 0 — clean the scaffold
-
-- Rename old project/package references that imply this is Atlas.
-- Keep useful ideas only where they serve MOK.
-- Replace adapter-first language with model-pool language.
-- Make the repo understandable to outside coding agents.
-
 ### Phase 1 — model registry
 
-Create a registry that defines each model:
+Define each model:
 
 - name
 - role
@@ -217,9 +218,8 @@ Create a registry that defines each model:
 - modality support
 - estimated RAM cost
 - estimated VRAM cost
-- load command
-- unload command
-- health check
+- lifecycle state
+- current device
 
 ### Phase 2 — core coordinator
 
@@ -235,6 +235,7 @@ This can begin with deterministic routing before any learned router exists.
 
 Implement model lifecycle control:
 
+- resident core model
 - loaded models
 - idle models
 - memory budget
@@ -268,11 +269,9 @@ Measure:
 
 ## Suggested repo direction for Claude/Codex
 
-If you are an AI coding agent working on this repo, your first job is not to expand the old adapter scaffold.
+If you are an AI coding agent working on this repo, your first job is to turn this into a working MOK runtime.
 
-Your first job is to turn this into a working MOK runtime.
-
-Start by creating or refactoring toward this structure:
+Start from this structure:
 
 ```text
 src/mok/
