@@ -2,48 +2,56 @@
 
 ## Summary
 
-Model Operating Kernel is a local-first architecture for managing multi-expert model execution like an operating system manages hardware resources.
+Model Operating Kernel is a local-first architecture for coordinating multiple specialized models under one shared runtime.
 
-It is not a replacement for serving engines. It sits above them as a resource-aware orchestration layer.
+It is not a replacement for model-serving engines. It sits above local or remote backends as a resource-aware orchestration layer that decides which model should be loaded, which model should run, and which model should be offloaded.
 
 ## Layers
 
 ```text
 User/API layer
     ↓
-MOK gateway
+Core coordinator model
     ↓
-Router
+Router / policy layer
     ↓
-Preload manager + telemetry + guardrails
+Model registry + memory budget manager
     ↓
-Execution backend
+Load / offload manager
+    ↓
+Expert model backends
     ↓
 Local GPU / system memory / storage
 ```
 
-## First implementation: Atlas Load Cartographer
+## First implementation target
 
-Atlas Load Cartographer is the first implementation of MOK. Its job is to map user prompts to expert routes, stage likely adapter resources, and record traceable operational data.
+The first implementation target is a working multi-model loop:
+
+```text
+prompt -> core chooses expert -> budget checks memory -> idle models offload -> selected expert runs -> response returns
+```
+
+The first pass can use mock backends. The architecture should prove the model lifecycle and memory budget before depending on real neural weights.
 
 ## Design principles
 
-### 1. Full model swaps are expensive
+### 1. The core coordinator stays available
 
-The base model should stay resident whenever possible. Expert adapters are treated as lightweight execution contexts.
+A small coordinator model should remain resident whenever possible. It acts as the control layer for task interpretation, route selection, and result merging.
 
-### 2. Routing must be measurable
+### 2. Experts are managed compute assets
 
-Routing should never become mysterious overhead. Every route decision should emit timing and confidence telemetry.
+Coder, instruct, vision, reasoning, memory, and tool models are separate assets with explicit metadata, backend information, memory estimates, and lifecycle state.
 
-### 3. Local hardware needs protection
+### 3. Split loading and offloading are first-class
 
-The default target is a 16GB VRAM workstation. Memory ceilings are part of the architecture, not an afterthought.
+The runtime must know whether each expert is offline, staged in RAM, resident in VRAM, active, or idle.
 
-### 4. Staging is separate from execution
+### 4. Local hardware needs protection
 
-The preload manager warms adapter files into system memory. It does not load them into VRAM. This separation keeps disk I/O, RAM staging, and GPU execution easier to test.
+The default target is a 16GB VRAM workstation. Memory ceilings and landing zones are part of the architecture, not an afterthought.
 
-### 5. The architecture should stay backend-neutral
+### 5. Runtime proof matters
 
-The gateway should remain abstract enough to test without requiring a specific model server.
+The first useful proof is not theory. It is a measured prototype that can route work, load one expert, offload another, and avoid GPU memory failure.
