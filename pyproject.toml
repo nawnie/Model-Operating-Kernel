@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "model-operating-kernel"
-version = "0.4.0a0"
-description = "A lightweight Model Operating Kernel for local multi-expert LLM routing and resource protection."
+version = "0.1.0a0"
+description = "A local-first multi-model runtime for split loading, offloading, routing, and VRAM budgeting."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -14,13 +14,14 @@ authors = [
 ]
 keywords = [
   "llm",
-  "lora",
-  "routing",
+  "moe",
+  "multi-model",
+  "runtime",
   "kernel",
-  "sglang",
   "vram",
   "local-first",
-  "multi-expert"
+  "load-offload",
+  "model-registry"
 ]
 dependencies = [
   "fastapi>=0.111",
