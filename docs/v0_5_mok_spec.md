@@ -1,56 +1,63 @@
-# v0.5 Model Operating Kernel Spec
+# Phase 1 Model Operating Kernel Spec
 
 ## Purpose
 
-v0.5 turns Model Operating Kernel from a named architecture into a measurable gateway lifecycle.
+Phase 1 turns Model Operating Kernel into a concrete multi-model runtime foundation.
 
 The target loop is:
 
 ```text
-prompt -> route selection -> adapter RAM staging -> telemetry record -> backend execution hook
+prompt -> core coordinator -> expert selection -> budget clearance -> load/offload -> expert execution -> merged response
 ```
 
-The first implementation, Atlas Load Cartographer, is designed for a constrained local workstation rather than a datacenter inference cluster.
+The first implementation should be designed for a constrained local workstation rather than a datacenter inference cluster.
 
 ## Kernel framing
 
 | OS kernel concept | MOK equivalent |
 |---|---|
-| Process scheduler | route and request scheduler |
-| Thread context switch | LoRA adapter swap |
-| Page cache | filesystem-to-RAM adapter staging |
-| Virtual memory | KV-cache and prompt-state mapping |
-| Memory protection | VRAM hard and soft limits |
-| Syscall trace | SQLite route telemetry |
+| Process scheduler | model/expert scheduler |
+| Resident kernel process | core coordinator model |
+| Process table | model registry |
+| Memory protection | VRAM budget manager |
+| Swap policy | load/offload manager |
+| Device state | offline/staged/resident/active/idle lifecycle |
+| Operational trace | telemetry events |
 
-## v0.5 lifecycle
+## Phase 1 lifecycle
 
-1. A prompt enters the FastAPI gateway.
-2. The router selects a route using deterministic anchors or embeddings.
-3. The preload manager stages the selected route adapter into OS page cache.
-4. The gateway records route timing, confidence, staged-hit status, and success state.
-5. The backend execution layer receives the selected route.
+1. The core coordinator receives a prompt.
+2. A routing policy selects the most appropriate expert model.
+3. The budget manager checks whether the expert can fit inside the usable VRAM budget.
+4. Idle experts are selected for offload when clearance is needed.
+5. The selected expert is promoted into the active pool.
+6. The expert runs through a mock or real backend.
+7. The response is returned through the coordinator.
 
-v0.5 may use a stubbed backend. The important part is that routing, staging, and telemetry are independently testable.
+Phase 1 may use mock backends. The important part is that registry state, budget pressure, and eviction decisions are testable.
 
 ## Resource guardrails
 
 Default guardrails:
 
-- Soft VRAM limit: 14.0GB
-- Hard VRAM limit: 14.5GB
-- Adapter LRU limit: 3
-- Max context tokens: 8192
-- Eviction policy: LRU
+- Total VRAM ceiling: 14.5GB
+- Landing zone: 3.5GB
+- Usable VRAM budget: 11.0GB
+- Core coordinator: resident and protected
+- First eviction target: idle experts
 
-A future GPU monitor should enforce these values before adapter loading or context growth can destabilize the workstation.
+A future GPU monitor should enforce these values using real device statistics before model loading or context growth can destabilize the workstation.
 
-## Telemetry contract
+## Model lifecycle states
 
-Every route event should record route, success, route timing, total timing, semantic score, staged-hit status, prompt size, and any error.
-
-The proof metric is not only answer quality. The proof metric is that routing and staging overhead remain cheaper than full model swaps.
+| State | Meaning |
+|---|---|
+| `offline` | On disk only. |
+| `staged` | Prepared in system RAM. |
+| `resident` | Permanently kept in VRAM, usually the core coordinator. |
+| `active` | In VRAM and currently executing. |
+| `idle` | In VRAM but not executing; eligible for eviction. |
 
 ## Next implementation target
 
-Next work should add a backend abstraction, SGLang client shim, VRAM guardrail checker, benchmark script, and route replay harness.
+Next work should add a mock backend, a simple runtime orchestrator, example expert config, and tests for the full prompt-to-expert loop.
