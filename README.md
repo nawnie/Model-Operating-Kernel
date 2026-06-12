@@ -1,187 +1,331 @@
 # Model Operating Kernel (MOK)
 
-> A lightweight, local-first kernel pattern for routing, staging, and protecting multi-expert LLM execution on consumer hardware.
+> A new multi-model architecture for building one usable AI system out of several specialized models: a core coordinator plus expert models for instruct, coding, vision, tools, memory, and future domains.
 
-**Model Operating Kernel** is the architecture layer for running dynamic multi-expert LLM pipelines inside strict local hardware limits. Instead of treating models as remote API abstractions, MOK treats base models, LoRA adapters, KV-caches, vector routes, telemetry, and tool inputs as volatile compute resources that must be scheduled, context-switched, staged, isolated, and governed.
+**Model Operating Kernel (MOK)** is not the Atlas adapter project, not a LoRA-only router, and not a normal AI agent wrapper. This repository starts a new architecture: a runtime that makes multiple models behave like one coordinated model system.
 
-The first implementation in this repository is **Atlas Load Cartographer**, a 16GB-VRAM-oriented prototype for safe adapter routing, async preload staging, SQLite telemetry, and local inference gateway control.
+The first goal is simple and concrete:
+
+> **Build a working local model system that can load, offload, route, and coordinate multiple expert models under constrained hardware.**
+
+A traditional Mixture-of-Experts model usually routes between experts inside one trained model. MOK explores a runtime-level version of that idea: separate specialist models are treated as swappable expert modules managed by a core process.
+
+---
+
+## The core idea
+
+A MOK system has three major parts:
+
+1. **Core coordinator model**
+   - The always-on controller.
+   - Understands the user request.
+   - Decides which expert model is needed.
+   - Maintains task state and final response control.
+
+2. **Expert model pool**
+   - Specialist models for different capabilities.
+   - Initial targets: instruct, coding, vision, reasoning, tool use, and memory/retrieval.
+   - Experts may be local LLMs, VLMs, adapters, quantized models, or external backend processes.
+
+3. **Load/offload manager**
+   - Keeps the system inside hardware limits.
+   - Loads the needed model or expert.
+   - Offloads inactive experts.
+   - Tracks RAM, VRAM, cache state, and route cost.
+
+The point is not to prove a name. The point is to make a working model-of-models runtime.
 
 ---
 
 ## Why this exists
 
-Most AI orchestration software falls into two extremes:
+Local AI systems are becoming more capable, but they are still awkward when one task needs multiple abilities.
 
-1. **Over-abstracted agent frameworks** that treat models like black-box APIs and add heavy coordination overhead.
-2. **Hard-silicon serving stacks** that optimize GPU execution but assume large production cards, clusters, or datacenter-style deployment.
+A strong coding model may be weak at vision. A vision model may be weak at long instruction following. A small instruct model may be fast but unable to handle deep code. A large model may be powerful but too expensive to keep loaded all the time on a 16GB GPU.
 
-MOK fills the lane between them: a resource-protective orchestration kernel for consumer desktop systems.
+MOK is meant to solve that at the runtime level.
 
-It borrows from traditional kernel design:
+Instead of forcing one model to do everything, MOK treats models like managed compute resources:
 
-- **Scheduling**: decide which model route should run and when.
-- **Context switching**: treat adapters as lightweight expert execution contexts.
-- **Virtual memory**: treat KV-cache and prompt state like pinned page references.
-- **Interrupt handling**: prepare future mid-generation route switches.
-- **Memory protection**: enforce VRAM ceilings before instability starts.
-- **Telemetry**: record proof that routing overhead is cheaper than full-model swapping.
+- load the expert needed now
+- offload what is not needed
+- keep a small/core coordinator available
+- pass structured state between experts
+- prevent VRAM crashes
+- measure routing and load costs
+- eventually make the system feel like one coherent model
 
 ---
 
-## Architecture
+## What MOK is
+
+MOK is a **runtime-level MoE-style architecture**.
+
+It is designed to coordinate multiple independent models as if they were expert regions of one larger system.
+
+Examples:
+
+| User need | Core decision | Expert used |
+|---|---|---|
+| Write or debug code | route to code expert | coder model |
+| Explain a general question | stay with core or instruct expert | instruct model |
+| Analyze an image | load vision expert | vision model |
+| Use a local tool | route to tool executor | tool model / tool layer |
+| Retrieve project memory | route to memory expert | retrieval model |
+| Multi-step task | coordinate several experts | core + selected experts |
+
+This is related to Mixture-of-Experts in spirit, but it is not limited to one trained MoE model. MOK manages a pool of real models at runtime.
+
+---
+
+## What MOK is not
+
+MOK is **not**:
+
+- the Atlas adapter project
+- a LoRA-only adapter router
+- a prompt-chain framework
+- a chatbot personality system
+- a LangChain clone
+- a research note pretending to be a product
+- a wrapper that assumes unlimited GPU memory
+
+Some early scaffold code may still contain names from prior experiments. Those should be cleaned up as the repo moves toward the actual MOK runtime.
+
+---
+
+## Target architecture
 
 ```text
-       ┌────────────────────────────────────────────────────────┐
-       │                    USER / CONSUMER LAYER               │
-       │               (Chat UI, Workflows, API Requests)       │
-       └───────────────────────────┬────────────────────────────┘
-                                   │
-                                   ▼
- ┌─────────────────────────────────────────────────────────────────────────────┐
- │                       MODEL OPERATING KERNEL (MOK)                          │
- │                                                                             │
- │  ┌────────────────────────┐ ┌────────────────────────┐ ┌─────────────────┐  │
- │  │    SCHEDULING LAYER    │ │     ROUTING KERNEL     │ │ MEMORY VIRTUAL. │  │
- │  │ (Batching, Prefill)    │ │ (Regex / Embed Anchors)│ │ (KV Cache Map)  │  │
- │  └────────────────────────┘ └────────────────────────┘ └─────────────────┘  │
- │  ┌───────────────────────────────────────────────────────────────────────┐  │
- │  │                     RESOURCE ISOLATION & GOVERNANCE                   │  │
- │  │          (VRAM Floor Protection, Land-Zone Cushioning, Telemetry)     │  │
- │  └───────────────────────────────────────────────────────────────────────┘  │
- └─────────────────────────────────┬───────────────────────────────────────────┘
-                                   │
-                                   ▼
-       ┌────────────────────────────────────────────────────────┐
-       │                  RAW EXECUTION HARDWARE                │
-       │            (SGLang/vLLM layer, VRAM, GPU Cores)        │
-       └────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      USER / APP LAYER                       │
+│        chat UI, API call, local workflow, automation         │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  CORE COORDINATOR MODEL                     │
+│   understands task, keeps state, chooses expert, merges work │
+└───────────────┬──────────────────────────────┬──────────────┘
+                │                              │
+                ▼                              ▼
+┌─────────────────────────────┐   ┌───────────────────────────┐
+│      MODEL ROUTER            │   │    MEMORY / STATE BUS      │
+│ intent, modality, cost, risk │   │ task state, cache, context │
+└───────────────┬─────────────┘   └─────────────┬─────────────┘
+                │                               │
+                ▼                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  LOAD / OFFLOAD MANAGER                     │
+│        VRAM budget, RAM staging, model cache, eviction       │
+└───────────────┬──────────────────────────────┬──────────────┘
+                │                              │
+                ▼                              ▼
+┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────┐
+│   INSTRUCT EXPERT   │ │    CODER EXPERT     │ │ VISION EXP. │
+└─────────────────────┘ └─────────────────────┘ └─────────────┘
+┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────┐
+│  REASONING EXPERT   │ │  MEMORY / RAG EXP.  │ │ TOOL EXPERT │
+└─────────────────────┘ └─────────────────────┘ └─────────────┘
 ```
 
 ---
 
-## Current status
+## First working milestone
 
-**Version:** `0.4-alpha`  
-**Hardware target:** local consumer workstation, especially 16GB VRAM cards  
-**Primary implementation:** Atlas Load Cartographer  
-**Runtime stance:** local-first, adapter-aware, telemetry-driven
+The first milestone is not a whitepaper. It is a minimal working MOK runtime.
 
-This repository currently contains the day-one architecture scaffold:
+### Milestone 1: working multi-model loop
 
-- MOK README / manifesto
-- Python package skeleton
-- async adapter preload manager
-- deterministic starter embedding/keyword router
-- SQLite route telemetry helpers
-- FastAPI gateway prototype
-- config schema for local experts
-- docs for v0.5 preload lifecycle and telemetry
+Build a prototype that can:
+
+1. Start a lightweight core coordinator.
+2. Register multiple expert models in a model registry.
+3. Accept a prompt through an API or CLI.
+4. Decide whether the request needs core, coder, instruct, vision, or another expert.
+5. Load the selected expert if it is not active.
+6. Offload inactive experts when memory limits require it.
+7. Run the expert.
+8. Return the result through the core coordinator.
+9. Log route, load time, offload time, memory pressure, and final result status.
+
+### Initial expert set
+
+The first practical expert set should be:
+
+- **Core coordinator**: small instruct/reasoning model
+- **Coder expert**: code-specialized local model
+- **Instruct expert**: general instruction model
+- **Vision expert**: image understanding model
+- **Memory/retrieval expert**: project/document context helper
+
+The exact models can change. The architecture should not depend on one model name.
 
 ---
 
-## Repository layout
+## Load and offload strategy
+
+MOK should treat models as resources with lifecycle states.
 
 ```text
-Model-Operating-Kernel/
-├── .gitignore
-├── LICENSE
-├── README.md
-├── AGENTS.md
-├── configs/
-│   └── experts_v04.json
-├── docs/
-│   ├── architecture.md
-│   ├── telemetry_schema.md
-│   └── v0_5_mok_spec.md
-├── src/
-│   └── atlas_load_cartographer/
-│       ├── __init__.py
-│       └── gateway/
-│           ├── __init__.py
-│           ├── app.py
-│           ├── config.py
-│           ├── embedding_router.py
-│           ├── preload_manager.py
-│           └── telemetry.py
-└── tests/
-    ├── test_embedding_router.py
-    └── test_preload_manager.py
+unloaded -> staged -> loaded -> active -> idle -> offloaded
 ```
 
-Runtime-heavy directories such as `models/`, `adapters/`, `.models/`, `data/`, and checkpoint formats are intentionally ignored.
+### Required manager behavior
+
+- Know which models are available.
+- Know which models are currently loaded.
+- Know estimated RAM/VRAM cost per model.
+- Load only what is needed.
+- Offload least-needed models first.
+- Prefer keeping the core coordinator alive.
+- Avoid crashing the GPU by crossing hard memory limits.
+- Record every load/offload event.
+
+This is the heart of the project.
 
 ---
 
-## Quick start
+## Current repository status
 
-```powershell
-# Clone
- git clone https://github.com/nawnie/Model-Operating-Kernel.git
- cd Model-Operating-Kernel
+**Status:** early scaffold / direction correction  
+**Goal:** working multi-model MOK prototype  
+**Hardware target:** local consumer hardware, especially 16GB VRAM systems  
+**Primary concern:** split loading, offloading, routing, and coordination
 
-# Create venv
- py -3.11 -m venv .venv
- .\.venv\Scripts\Activate.ps1
+The current codebase is only a starting scaffold. Some names and files may still reflect older adapter-routing experiments. Those should be renamed or replaced as the MOK runtime becomes real.
 
-# Install package for development
- pip install -e .[dev]
+---
 
-# Run tests
- pytest
+## Near-term build plan
 
-# Launch the gateway prototype
- uvicorn atlas_load_cartographer.gateway.app:app --reload --port 8787
+### Phase 0 — clean the scaffold
+
+- Rename old project/package references that imply this is Atlas.
+- Keep useful ideas only where they serve MOK.
+- Replace adapter-first language with model-pool language.
+- Make the repo understandable to outside coding agents.
+
+### Phase 1 — model registry
+
+Create a registry that defines each model:
+
+- name
+- role
+- backend
+- local path or server endpoint
+- modality support
+- estimated RAM cost
+- estimated VRAM cost
+- load command
+- unload command
+- health check
+
+### Phase 2 — core coordinator
+
+Create the first coordinator loop:
+
+```text
+prompt -> classify need -> choose expert -> call expert -> merge result -> respond
 ```
 
-Then test routing:
+This can begin with deterministic routing before any learned router exists.
+
+### Phase 3 — load/offload manager
+
+Implement model lifecycle control:
+
+- loaded models
+- idle models
+- memory budget
+- eviction policy
+- load queue
+- offload queue
+- telemetry
+
+### Phase 4 — first expert integration
+
+Integrate at least two real experts:
+
+- core/instruct model
+- coder model
+
+Then add vision once the model lifecycle is stable.
+
+### Phase 5 — benchmark and prove it
+
+Measure:
+
+- route decision time
+- model load time
+- model unload time
+- memory pressure
+- time to first token
+- total response time
+- failure modes
+
+---
+
+## Suggested repo direction for Claude/Codex
+
+If you are an AI coding agent working on this repo, your first job is not to expand the old adapter scaffold.
+
+Your first job is to turn this into a working MOK runtime.
+
+Start by creating or refactoring toward this structure:
+
+```text
+src/mok/
+├── __init__.py
+├── core/
+│   ├── coordinator.py
+│   └── state.py
+├── models/
+│   ├── registry.py
+│   ├── lifecycle.py
+│   └── backends.py
+├── routing/
+│   └── router.py
+├── memory/
+│   └── budget.py
+├── telemetry/
+│   └── events.py
+└── api/
+    └── app.py
+```
+
+Do not assume the first implementation must use LoRA. LoRA may become one expert type, but MOK is about coordinating multiple models and managing their load/offload lifecycle.
+
+---
+
+## Development commands
 
 ```powershell
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8787/route `
-  -ContentType "application/json" `
-  -Body '{"prompt":"Write a Python preload manager for LoRA adapters"}'
+git clone https://github.com/nawnie/Model-Operating-Kernel.git
+cd Model-Operating-Kernel
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .[dev]
+pytest
 ```
 
 ---
 
 ## Core principle
 
-A full model swap is a cold reboot.  
-A LoRA adapter swap is a thread context switch.  
-A KV-cache is virtual memory.  
-A route event is a syscall trace.  
-A 16GB GPU is not a toy — it is a constrained execution chamber that needs a kernel.
+A single model does not have to do everything.
 
----
+MOK is the runtime that decides:
 
-## Roadmap
+- which model should think
+- which model should see
+- which model should code
+- which model should remember
+- which model should be loaded
+- which model should be offloaded
+- how the result becomes one coherent answer
 
-### v0.4-alpha
-
-- [x] Repository identity and MOK terminology
-- [x] Atlas Load Cartographer package scaffold
-- [x] Async preload manager
-- [x] Route telemetry schema
-- [x] Local expert config example
-- [x] FastAPI gateway skeleton
-
-### v0.5
-
-- [ ] Combine embedding router + preload manager in gateway lifecycle
-- [ ] Add route confidence thresholds
-- [ ] Add adapter staged-hit telemetry
-- [ ] Add VRAM guardrail config
-- [ ] Add SGLang client shim
-- [ ] Add benchmark scripts for route overhead vs model swap overhead
-
-### v0.6+
-
-- [ ] Token-level interrupt hooks
-- [ ] Mid-generation route exception handling
-- [ ] KV-cache page table abstraction
-- [ ] Adapter eviction policy
-- [ ] Route replay harness
-- [ ] Proof-deck charts from SQLite telemetry
+The first win is a working prototype. The theory comes after the model actually runs.
 
 ---
 
