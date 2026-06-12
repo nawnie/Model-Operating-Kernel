@@ -39,7 +39,14 @@ class GatewayConfig(BaseModel):
         return {expert.route: expert.anchors for expert in self.experts}
 
 
-def load_gateway_config(path: str | Path = "configs/experts_v04.json") -> GatewayConfig:
+def load_gateway_config(path: str | Path = "configs/experts_v04.example.json") -> GatewayConfig:
+    """Load gateway configuration from JSON.
+
+    The repository ships with an example config so the gateway is runnable before
+    local adapter paths are created. Copy it to a local runtime config when real
+    adapter files are available.
+    """
+
     config_path = Path(path)
     with config_path.open("r", encoding="utf-8") as handle:
         payload: dict[str, Any] = json.load(handle)
