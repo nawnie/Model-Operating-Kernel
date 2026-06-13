@@ -8,7 +8,8 @@ local memory lifecycle.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Dict, List, Optional
+from time import time
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +36,15 @@ class ExpertMetadata(BaseModel):
     state: AssetState = AssetState.OFFLINE
     current_device: str = "cpu"
 
+    # Runtime scheduling metadata. These values let the budget manager make
+    # eviction decisions without guessing or mutating state too early.
+    pinned: bool = False
+    can_evict: bool = True
+    priority: int = 100
+    loaded_at: Optional[float] = None
+    last_used_at: Optional[float] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
 
 class ModelRegistry:
     """In-memory registry for expert model metadata and lifecycle state."""
@@ -43,6 +53,20 @@ class ModelRegistry:
         self._experts: Dict[str, ExpertMetadata] = {}
 
     def register_expert(self, expert: ExpertMetadata) -> None:
+        """Register or replace an expert.
+
+        RESIDENT experts are treated as protected core assets by default. They
+        are pinned and marked non-evictable unless the caller explicitly changes
+        them later.
+        """
+
+        if expert.state == AssetState.RESIDENT:
+            expert.pinned = True
+            expert.can_evict = False
+            if expert.loaded_at is None:
+                expert.loaded_at = time()
+            if expert.last_used_at is None:
+                expert.last_used_at = expert.loaded_at
         self._experts[expert.name] = expert
 
     def get_expert(self, name: str) -> Optional[ExpertMetadata]:
@@ -55,6 +79,49 @@ class ModelRegistry:
         return [expert for expert in self._experts.values() if expert.state == state]
 
     def update_state(self, name: str, state: AssetState, device: str) -> None:
-        if name in self._experts:
-            self._experts[name].state = state
-            self._experts[name].current_device = device
+        """Update lifecycle state and device placement for an expert."""
+
+        expert = self._experts.get(name)
+        if expert is None:
+            return
+
+        now = time()
+        expert.state = state
+        expert.current_device = device
+
+        if state in {AssetState.RESIDENT, AssetState.ACTIVE, AssetState.IDLE}:
+            if expert.loaded_at is None:
+                expert.loaded_at = now
+            expert.last_used_at = now
+
+        if state == AssetState.OFFLINE:
+            expert.loaded_at = None
+            expert.current_device = "cpu"
+
+        if state == AssetState.RESIDENT:
+            expert.pinned = True
+            expert.can_evict = False
+
+    def mark_used(self, name: str) -> None:
+        """Refresh an expert's last-used timestamp without changing its state."""
+
+        expert = self._experts.get(name)
+        if expert is not None:
+            expert.last_used_at = time()
+
+    def get_eviction_candidates(self) -> List[ExpertMetadata]:
+        """Return IDLE experts that may be evicted, oldest and lowest priority first."""
+
+        candidates = [
+            expert
+            for expert in self.get_experts_by_state(AssetState.IDLE)
+            if expert.can_evict and not expert.pinned
+        ]
+        return sorted(
+            candidates,
+            key=lambda expert: (
+                expert.priority,
+                expert.last_used_at if expert.last_used_at is not None else 0.0,
+                expert.name,
+            ),
+        )
