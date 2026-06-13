@@ -11,21 +11,26 @@ MOK is a multi-model runtime. It coordinates a small resident core model with sp
 The first practical loop should be:
 
 ```text
-prompt -> core chooses expert -> budget checks VRAM -> idle models offload -> selected expert loads -> mock response returns
+prompt -> core chooses expert -> budget returns eviction plan -> runtime offloads idle models -> selected expert loads -> mock response returns -> trace logs
 ```
 
 ## Read first
 
 1. `README.md`
-2. `AGENTS.md`
-3. `src/mok/models/registry.py`
-4. `src/mok/memory/budget.py`
-5. `tests/test_model_registry.py`
-6. `tests/test_memory_budget.py`
+2. `docs/runtime_mvp.md`
+3. `AGENTS.md`
+4. `src/mok/models/registry.py`
+5. `src/mok/memory/budget.py`
+6. `tests/test_model_registry.py`
+7. `tests/test_memory_budget.py`
+
+Read `docs/research_plan.md` only after the runtime task is understood. Do not start training work yet.
 
 ## Project boundary
 
 This repo is MOK-only. Keep implementation under `src/mok/`.
+
+Do not add Atlas naming, Atlas paths, or old adapter-router assumptions.
 
 ## First implementation target
 
@@ -35,6 +40,8 @@ Create or complete:
 src/mok/models/backends.py
 src/mok/orchestration/__init__.py
 src/mok/orchestration/runtime.py
+src/mok/telemetry/__init__.py
+src/mok/telemetry/events.py
 configs/example_experts.json
 tests/test_mock_backend.py
 tests/test_orchestration_runtime.py
@@ -51,9 +58,18 @@ tests/test_orchestration_runtime.py
   "vram_cost_gb": 4.0,
   "ram_cost_gb": 6.0,
   "state": "offline",
-  "current_device": "cpu"
+  "current_device": "cpu",
+  "pinned": false,
+  "can_evict": true,
+  "priority": 100
 }
 ```
+
+## Expected budget behavior
+
+The budget manager returns an eviction plan. It must not mutate the registry directly.
+
+The runtime executes the plan and only updates model state after backend offload/load succeeds.
 
 ## Expected orchestration response shape
 
@@ -62,21 +78,22 @@ tests/test_orchestration_runtime.py
   "selected_expert": "coder",
   "evicted": ["vision"],
   "core_state": "resident",
-  "expert_state": "active",
-  "response": "mock response from coder"
+  "expert_state": "idle",
+  "response": "mock response from coder",
+  "trace_id": "mock-trace-id"
 }
 ```
 
 ## Suggested next branch
 
 ```bash
-git checkout -b feature/phase1-multi-model-runtime
+git checkout -b feature/runtime-mvp-mock-loop
 ```
 
 ## Suggested commit message
 
 ```text
-Implement phase 1 MOK multi-model runtime loop
+Implement MOK runtime MVP mock loop
 ```
 
 ## Definition of done
@@ -84,6 +101,8 @@ Implement phase 1 MOK multi-model runtime loop
 - `pytest` passes.
 - Registry tracks core and expert models.
 - Budget manager protects the landing zone.
+- Budget manager returns a non-mutating eviction plan.
 - Resident core coordinator is preserved.
 - Idle experts are selected for offload before loading a new expert.
 - Mock backend proves the loop without real model weights.
+- Runtime trace records route, evictions, state changes, and timing.
