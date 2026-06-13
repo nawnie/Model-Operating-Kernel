@@ -37,6 +37,8 @@ def test_update_state_changes_lifecycle_and_device() -> None:
     assert expert is not None
     assert expert.state == AssetState.ACTIVE
     assert expert.current_device == "cuda:0"
+    assert expert.loaded_at is not None
+    assert expert.last_used_at is not None
 
 
 def test_get_experts_by_state() -> None:
@@ -70,3 +72,52 @@ def test_get_experts_by_state() -> None:
 
     assert len(resident) == 1
     assert resident[0].name == "core"
+    assert resident[0].pinned is True
+    assert resident[0].can_evict is False
+
+
+def test_eviction_candidates_ignore_pinned_or_active_models() -> None:
+    registry = ModelRegistry()
+    registry.register_expert(
+        ExpertMetadata(
+            name="core",
+            role="coordinator",
+            backend="mock",
+            api_url="mock://core",
+            vram_cost_gb=3.0,
+            ram_cost_gb=4.0,
+            state=AssetState.RESIDENT,
+            current_device="cuda:0",
+        )
+    )
+    registry.register_expert(
+        ExpertMetadata(
+            name="coder",
+            role="code generation",
+            backend="mock",
+            api_url="mock://coder",
+            vram_cost_gb=4.0,
+            ram_cost_gb=6.0,
+            state=AssetState.IDLE,
+            current_device="cuda:0",
+            priority=10,
+        )
+    )
+    registry.register_expert(
+        ExpertMetadata(
+            name="vision",
+            role="image understanding",
+            backend="mock",
+            api_url="mock://vision",
+            vram_cost_gb=5.0,
+            ram_cost_gb=7.0,
+            state=AssetState.IDLE,
+            current_device="cuda:0",
+            pinned=True,
+            can_evict=False,
+        )
+    )
+
+    candidates = registry.get_eviction_candidates()
+
+    assert [candidate.name for candidate in candidates] == ["coder"]
