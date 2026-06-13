@@ -2,13 +2,42 @@
 
 > A multi-model runtime architecture for building one usable AI system out of several specialized models: a resident core coordinator plus expert models for instruction, coding, vision, tools, memory, reasoning, and future domains.
 
-**Model Operating Kernel (MOK)** is a new architecture for making multiple models behave like one coordinated model system. It is a runtime layer for split loading, offloading, routing, and resource budgeting across independent model assets.
+**Model Operating Kernel (MOK)** is a runtime layer for split loading, offloading, routing, and resource budgeting across independent model assets.
 
 The first goal is simple and concrete:
 
 > **Build a working local model system that can load, offload, route, and coordinate multiple expert models under constrained hardware.**
 
 A traditional Mixture-of-Experts model routes between experts inside one trained model. MOK explores a runtime-level version of that idea: separate specialist models are treated as managed expert assets coordinated by a core process.
+
+---
+
+## Current build priority
+
+The project is now split into two tracks:
+
+1. **Runtime MVP — build now**
+   - model registry
+   - memory budget manager
+   - mock backends
+   - orchestration loop
+   - telemetry
+   - FastAPI/CLI entrypoint
+
+2. **Research / training track — later**
+   - trained router
+   - trained core coordinator
+   - memory-policy learning
+   - expert fine-tuning
+   - oracle evaluation
+   - adapter-vs-full-model comparisons
+
+Read these two docs first:
+
+- [`docs/runtime_mvp.md`](docs/runtime_mvp.md) — the immediate build contract.
+- [`docs/research_plan.md`](docs/research_plan.md) — the later training and evaluation track.
+
+The runtime must work before training starts.
 
 ---
 
@@ -26,13 +55,13 @@ A MOK system has three major parts:
 2. **Expert model pool**
    - Specialist models for different capabilities.
    - Initial targets: instruct, coding, vision, reasoning, tool use, and memory/retrieval.
-   - Experts may be local LLMs, VLMs, quantized models, adapters, or external backend processes.
+   - Experts may be local LLMs, VLMs, quantized models, adapters, mock backends, or external backend processes.
 
 3. **Load/offload manager**
    - Keeps the system inside hardware limits.
    - Loads the needed model or expert.
    - Offloads inactive experts.
-   - Tracks RAM, VRAM, cache state, and route cost.
+   - Tracks RAM, VRAM, cache state, route cost, and lifecycle state.
 
 The point is to make a working model-of-models runtime.
 
@@ -131,7 +160,7 @@ MOK is **not**:
 
 ## First working milestone
 
-The first milestone is not a whitepaper. It is a minimal working MOK runtime.
+The first milestone is a minimal working MOK runtime.
 
 ### Milestone 1: working multi-model loop
 
@@ -142,11 +171,12 @@ Build a prototype that can:
 3. Accept a prompt through an API or CLI.
 4. Decide whether the request needs core, coder, instruct, vision, or another expert.
 5. Check the memory budget before promoting an expert.
-6. Load the selected expert if it is not active.
-7. Offload inactive experts when memory limits require it.
-8. Run the expert or mock backend.
-9. Return the result through the core coordinator.
-10. Log route, load time, offload time, memory pressure, and final result status.
+6. Return a **non-mutating eviction plan** if memory pressure requires offload.
+7. Execute planned offloads in the runtime.
+8. Load or activate the selected expert.
+9. Run the expert or mock backend.
+10. Mark the expert idle after completion.
+11. Log route, load time, offload time, memory pressure, and final result status.
 
 ### Initial expert set
 
@@ -155,7 +185,7 @@ The first practical expert set should be:
 - **Core coordinator**: small instruct/reasoning model
 - **Coder expert**: code-specialized local model
 - **Instruct expert**: general instruction model
-- **Vision expert**: image understanding model
+- **Vision expert**: image understanding model or mock vision backend
 - **Memory/retrieval expert**: project/document context helper
 
 The exact models can change. The architecture should not depend on one model name.
@@ -202,6 +232,8 @@ The current codebase contains the first MOK-native core pieces:
 - `src/mok/memory/budget.py`
 - `tests/test_model_registry.py`
 - `tests/test_memory_budget.py`
+- `docs/runtime_mvp.md`
+- `docs/research_plan.md`
 
 ---
 
@@ -209,7 +241,7 @@ The current codebase contains the first MOK-native core pieces:
 
 ### Phase 1 — model registry
 
-Define each model:
+Define each model and track scheduling metadata:
 
 - name
 - role
@@ -220,31 +252,42 @@ Define each model:
 - estimated VRAM cost
 - lifecycle state
 - current device
+- pinned / can-evict flags
+- priority
+- loaded-at and last-used timestamps
 
-### Phase 2 — core coordinator
+### Phase 2 — budget manager
+
+The budget manager must plan allocation safely:
+
+- calculate VRAM pressure
+- preserve a landing zone
+- protect resident core assets
+- prefer idle, non-pinned eviction candidates
+- return an eviction plan
+- avoid mutating registry state before actual backend offload succeeds
+
+### Phase 3 — mock backend layer
+
+Create mock experts before real model wiring:
+
+```text
+src/mok/models/backends.py
+```
+
+The first backend layer should simulate load latency, unload latency, generation latency, memory cost, and failure states.
+
+### Phase 4 — orchestration runtime
 
 Create the first coordinator loop:
 
 ```text
-prompt -> classify need -> choose expert -> call expert -> merge result -> respond
+prompt -> classify need -> choose expert -> budget plan -> evict/load -> call expert -> merge result -> respond
 ```
 
 This can begin with deterministic routing before any learned router exists.
 
-### Phase 3 — load/offload manager
-
-Implement model lifecycle control:
-
-- resident core model
-- loaded models
-- idle models
-- memory budget
-- eviction policy
-- load queue
-- offload queue
-- telemetry
-
-### Phase 4 — first expert integration
+### Phase 5 — real backend integration
 
 Integrate at least two real experts:
 
@@ -253,7 +296,7 @@ Integrate at least two real experts:
 
 Then add vision once the model lifecycle is stable.
 
-### Phase 5 — benchmark and prove it
+### Phase 6 — benchmark and prove it
 
 Measure:
 
@@ -270,6 +313,14 @@ Measure:
 ## Suggested repo direction for Claude/Codex
 
 If you are an AI coding agent working on this repo, your first job is to turn this into a working MOK runtime.
+
+Read in this order:
+
+1. `README.md`
+2. `docs/runtime_mvp.md`
+3. `src/mok/models/registry.py`
+4. `src/mok/memory/budget.py`
+5. `docs/research_plan.md` only after the runtime task is understood
 
 Start from this structure:
 
