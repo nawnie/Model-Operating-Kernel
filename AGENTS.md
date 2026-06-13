@@ -6,11 +6,43 @@ This repository is intended to be worked on by AI coding agents such as Claude, 
 
 **Repo name:** Model Operating Kernel  
 **Architecture category:** Model Operating Kernel (MOK)  
-**Current milestone:** Phase 1 — model registry and memory budget manager
+**Current milestone:** Runtime MVP — registry, budget planning, mock backends, and orchestration loop
 
 MOK is a local-first multi-model runtime. Its first goal is to make a working system that coordinates multiple specialized models — such as a core coordinator, instruct model, coder model, vision model, reasoning model, and tool model — under one shared hardware budget.
 
 This is not an Atlas project, not a LoRA-adapter project, and not a generic agent framework. Shared ideas may exist, but this repo is new and should stand on its own.
+
+## Read order
+
+1. `README.md`
+2. `docs/runtime_mvp.md`
+3. `src/mok/models/registry.py`
+4. `src/mok/memory/budget.py`
+5. `tests/test_model_registry.py`
+6. `tests/test_memory_budget.py`
+7. `docs/research_plan.md` only after the runtime task is understood
+
+## Build track vs research track
+
+### Build now
+
+- model registry
+- non-mutating budget plans
+- mock backends
+- runtime orchestrator
+- telemetry trace
+- API or CLI loop
+
+### Do later
+
+- trained router
+- trained coordinator
+- LoRA/adapters as the main expert strategy
+- oracle evaluation harness
+- memory-policy learning
+- benchmark report
+
+Research can improve the runtime later, but it must not block the first working loop.
 
 ## Core idea
 
@@ -19,8 +51,8 @@ MOK treats models as managed compute assets:
 - **Core coordinator model**: resident model that stays loaded and decides what expert should be used.
 - **Expert models**: specialized models for coding, instruction following, vision, reasoning, tools, memory, or other roles.
 - **Model registry**: tracks every expert, backend, memory estimate, lifecycle state, and device location.
-- **Budget manager**: protects VRAM by deciding what must be offloaded before loading a new expert.
-- **Load/offload manager**: future component that will physically stage, load, unload, and route models.
+- **Budget manager**: protects VRAM by returning an eviction plan before loading a new expert.
+- **Load/offload manager**: future component that physically stages, loads, unloads, and routes models.
 
 ## Hardware target
 
@@ -48,58 +80,16 @@ Agents must avoid assuming A100/H100-class memory, cluster infrastructure, or un
 4. **Split loading and offloading are first-class.**
    - The system must track what is offline, staged in RAM, resident in VRAM, active, or idle.
 
-5. **Do not turn this into a generic chat-agent framework.**
+5. **Budget planning must not lie to the registry.**
+   - The budget manager returns an eviction plan.
+   - The runtime updates registry state only after backend offload/load succeeds.
+
+6. **Do not turn this into a generic chat-agent framework.**
    - MOK is a runtime/control layer for model assets.
-
-## Preferred development flow
-
-Use small, reviewable commits:
-
-1. Keep architecture docs and implementation aligned.
-2. Add tests for every core component.
-3. Prefer dependency-light modules until a real backend is required.
-4. Put runtime config in `configs/`.
-5. Put design docs in `docs/`.
-6. Put local-only artifacts under ignored directories.
 
 ## Current high-priority tasks
 
-### Task 1 — Finish the model registry
-
-Work from:
-
-```text
-src/mok/models/registry.py
-```
-
-The registry should track:
-
-- model name
-- model role
-- backend type
-- API URL or local endpoint
-- estimated VRAM cost
-- estimated RAM cost
-- lifecycle state
-- current device
-
-### Task 2 — Finish the budget manager
-
-Work from:
-
-```text
-src/mok/memory/budget.py
-```
-
-The budget manager should:
-
-1. Calculate estimated VRAM pressure.
-2. Preserve a landing zone for context growth and backend overhead.
-3. Refuse to evict the resident core coordinator.
-4. Prefer evicting idle experts first.
-5. Return the model names that must be offloaded before loading a new expert.
-
-### Task 3 — Add mock backend clients
+### Task 1 — Add mock backend clients
 
 Create:
 
@@ -107,19 +97,49 @@ Create:
 src/mok/models/backends.py
 ```
 
-The first backend layer can simulate model load latency, unload latency, and generation latency. Do not require real model weights for the first full-system test.
+The first backend layer can simulate model load latency, unload latency, generation latency, and failures. Do not require real model weights for the first full-system test.
 
-### Task 4 — Add the first orchestration loop
+### Task 2 — Add the first orchestration loop
 
-Create a simple API or CLI loop that does:
+Create:
 
 ```text
-prompt -> core decides route -> budget checks incoming expert -> offload idle experts -> load selected expert -> execute mock response
+src/mok/orchestration/runtime.py
 ```
 
-### Task 5 — Keep docs pitch-ready
+The first loop should do:
 
-The repo should remain legible to outside engineers. Update `README.md`, `docs/architecture.md`, and future specs when implementation changes.
+```text
+prompt -> core decides route -> budget plans clearance -> runtime offloads idle experts -> runtime loads selected expert -> mock response returns -> trace logs
+```
+
+### Task 3 — Add telemetry trace
+
+Create:
+
+```text
+src/mok/telemetry/events.py
+```
+
+Record route, model states, evictions, load time, execution time, memory pressure, and success/failure.
+
+### Task 4 — Add CLI or FastAPI entrypoint
+
+Create one minimal entrypoint after the runtime loop works:
+
+```text
+src/mok/api/app.py
+```
+
+or
+
+```text
+src/mok/cli.py
+```
+
+### Task 5 — Keep docs aligned
+
+Update `docs/runtime_mvp.md` when runtime behavior changes. Update `docs/research_plan.md` only for later training/eval work.
 
 ## Style rules
 
@@ -142,12 +162,4 @@ pytest
 
 ## Agent handoff summary
 
-Start by reading:
-
-1. `README.md`
-2. `src/mok/models/registry.py`
-3. `src/mok/memory/budget.py`
-4. `tests/test_model_registry.py`
-5. `tests/test_memory_budget.py`
-
-Then implement the mock backend and first orchestration loop with tests.
+Implement the mock backend and first orchestration loop with tests. Do not start training work until the runtime MVP completes.
