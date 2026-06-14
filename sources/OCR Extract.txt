@@ -1,0 +1,1207 @@
+===== page_01.png =====
+Model Operating Kernel
+ATraining&ResearchDevelopmentPlan
+Turningaruntimemodel-of-modelsintoalearned,memory-efficientMoEsystem
+github.com/nawnie/Model-Operating-Kernel
+Version 2.0 (Expanded)- June 2026 -Hardware target:16 GB VRAM consumer GPU
+Version 2.0 rewrites Section 3 to spell out howMOK is a new architecture-a kernel for models, not another
+model-and expands the training recipes(Sections 4-7),the data and evaluation program(Sections 8-9),and
+overwithlightedits.
+
+===== page_02.png =====
+Contents
+
+===== page_03.png =====
+1.Executive Summary
+theybehavelike onecoherent systemonconstrainedhardware.Therepositorytodayis an
+This document extends that scaffold intoa research and training program:what to train,howto train
+it,and howtoproveeachpiecebeatstheheuristicit replaces.
+MOKisanewarchitecture,not anothermodel:anoperating-systemlayerinwhichmodelsarethe
+workloadand thekernel-scheduler,pager,ABl,drivers-is theproduct.Section3spells out the
+mechanisms that make that claim literal.The second thesis is that MOK is not only a plumbing
+problem.The parts that decide which model thinks,sees,codes,or remembers-the router,the
+coordinator,the eviction/prefetchpolicy-areexactly theparts thatbenefit fromlearning.And the
+parts that make many experts fit in 16 GB - shared-base LoRA adapters that hot-swap in
+milliseconds instead of full models that swapin seconds-are exactly theparts that need a
+adapters,learned memory policy,cost model).
+Thefive thingsworth training
+1.The Router-picks the right expert(s)perrequest, cheaply and cost-aware.The single
+highest-leveragelearned component.
+2. The Core Coordinator-decomposes tasks,emits structured routing decisions,and merges
+expert outputsinto one answer.
+3.TheLoRA ExpertLibrary-domain adaptersoverone sharedquantized base,enablingmany
+experts in a 16 GB budget.
+thenext expert.
+5.TheVRAMCostModel-a calibratedestimatorthatkeepstheruntimeinside thelandingzone
+under real context loads.
+Theplan sequences these so that nothing is trained before there is a baseline tobeat.Everylearned
+component shipsfirst as a deterministicheuristic,is instrumented tolog traces,and only thenis
+projecthonest and shippable ateverystep.
+2.WhereMoKStandsToday
+Therepository contains the first MoK-nativepieces and a clear contract for what comes next,read
+directlyfrom the codebase:
+·src/mok/models/registry.py—anin-memory ModelRegistryholding ExpertMetadata(name,
+role,backend,api_url,vram_cost_gb,ram_cost_gb,state,current_device)and a five-value
+lifecycle enum:offline->staged->resident->active->idle.
+14.5 GB) and a 3.5GBlanding zone.It computes VRAMpressure fromresident/active/idle
+experts and returns aneviction list.The current policyisFIFOoverIDLEexperts;RESIDENT
+(the core)is never evicted;ACTIVE is never evicted in this first pass.
+·Tests—cover the registry and thebudget guardrail. CLAUDE.md defines the immediate
+offload -> expert loads -> mock response returns, with first targets backends.py,
+orchestration/runtime.py,configs/example_experts.json.
+
+===== page_04.png =====
+Two observations drive this plan.First,routing in the target loop is deterministic by design for now -
+theREADMEnotesroutingcanbeginwith deterministicroutingbefore any learned routerexists.
+That is thehookfor the learning track.Second,the static vram_cost_gband FIFO eviction are
+whichexpert isabouttobeneeded again.Botharelearnable.
+Designprincipleinherited fromtherepo
+"The first win is a working prototype.The theory comes after the model actually runs.”Every training effort
+below is gated behind a runnable baseline and a logged trace stream. We do not train in the dark.
+3.TheArchitecture:AKernel,NotAnotherModel
+itself: it schedules processes,allocates memory, abstracts devices, and mediates everything through
+stable interfaces.MOK does exactly that for models.The models are the workload;thekernel is the
+trainedmodelcanreplace thelayer,andpreciselywherelearningfitsinside it.
+3.1 The kernel analogy, made literal
+repo or a named target in CLAUDE.md:
+OS concept
+MOKsubsystem
+Whatitdoes
+Process scheduler
+Router (src/mok/routing/router.py)
+Decides which expert gets the GPU next,
+and whether thecore can answer without
+dispatching at all
+Virtual memory/pager
+BudgetManager+lifecycle states
+Pages experts between disk (offline),RAM
+(src/mok/memory/budget.py,
+(staged), and VRAM (resident/active/idle)
+registry.py)
+under a hard 14.5 GB ceiling - swap for
+models
+System-call ABI
+Expert call contract (mok.route.v1
+One uniform way to invoke any expert,
++backend API)
+regardless of vendor,format,or size
+Device drivers
+Backends
+Adapt vLLM,Ilama.cpp, HTTP endpoints,
+(src/mok/models/backends.py)
+or mocks to one interface -the kernel
+never knows engine details
+Init/resident daemon
+Core coordinator
+The always-on process that owns task
+state and final output control
+IPC/message bus
+Memory & state bus
+Structured state passed between experts-
+typed payloads, not re-pasted chat text
+Page-cacheprefetcher
+Next-expert predictor(Section 7)
+Speculatively stages what the workload will
+need next,hiding load latency
+3.2Howthisdiffersfrom"justanothermodel"
+A monolithic model-including an in-model Mixture-of-Experts-is one trained artifact:its experts live
+inside oneparameterspace,are trained jointly,route through a gate fixed at training time,andmust
+beresident together.MOK inverts every one of those properties,and each inversion is an
+architecturalmechanism,notamodelproperty:
+
+===== page_05.png =====
+·Independent artifacts—experts are separately produced models- different vendors,sizes,
+shared weights.Capability is added byregistering an asset,not by retraining a network.
+·Routing as a replaceablepolicy—thegateisaprocess thekernel owns.It canberegex
+rules today and a trained policy next quarter, swapped by config,with thekernel unchanged. In
+a trainedMoEthegateisfrozeninto theweightsforever.
+paged.A monolithicmodel'smemory floor is its parameter count;MoK'sfloor is the core
+coordinatorplus whichever expert is active.This is what makes frontier-style breadth
+reachableona16GBcard.
+·Independent upgrade paths—swap the coderexpert without touching vision;rollback a bad
+router checkpoint without retraining anything.A monolith upgrades as one indivisible blob.
+Nearest neighbors, and why they are not this: an in-model MoE routes inside one network and
+cannotpage experts it doesnotown;prompt-chainframeworks orchestrate calls but have no
+among hosted APls and never face aVRAMbudget at all.The lifecycle state machine(offline->
+new combination-themissingOS layerforlocal multi-model systems.
+3.3TheexpertABlandthetwoplanes
+(ExpertMetadata),a backend that speaks the call contract,declared RAM/VRAM costs,and
+structured I/O.Nothing about architecture or weights.That is why a 100MBLoRA adapter and an 8
+GB vision model areboth“experts"to the kernel-the ABl hides the difference,the budget manager
+prices it.
+Controlplanevsdataplane.Everything thekerneldecides-route,plan,clearance,eviction,
+is thedataplane:heavy GPU inference.Thediscipline that keepsMOKfeeling like onefastmodel is
+thatcontrol-planedecisionsneverblockondata-planework,andeverylearned component inthis
+plan lives in the control plane,where models are tiny and mistakes arerecoverable.
+3.4Wherelearningfits:learnedpoliciesinsideafixedkernel
+Systemsresearchhasalongprecedent:learned cachereplacement,learnedbranchpredictors,
+learnedqueryoptimizers.Thekernel'sinvariantsstayhard-coded-neverevict theresident core,
+learned:which expert (router),how to decompose andmerge(coordinator),what to evict and
+model-load event.So learning decomposes into components trainable with local signals,connected
+bylogged traces:
+Component
+Learning signal
+Methodfamily
+Router
+Did the chosen expert producea
+Supervised multi-label classification ->
+correct/preferredansweratacceptablecost?
+contextual bandit/ offline RL
+Coordinator
+Did the decomposition + merge yield a
+Distillation(SFT)->preference tuning
+correct final answer?
+(DPO/KTO)
+Expertadapters
+Per-domain task accuracy on held-out sets
+QLoRA supervised fine-tuning
+
+===== page_06.png =====
+Component
+Learning signal
+Method family
+Memory policy
+Latency from cache misses + OOM
+Heuristics -> next-use prediction ->
+avoidance+ memory cost
+offline RL
+Cost model
+MeasuredVRAM/latencyvspredicted
+Regression / online calibration
+3.5Coreresearchhypotheses
+·H1(Routingpays)—A trained cost-aware router achieves end-taskqualitywithin a small
+least95%of oraclequalityat under40%of oraclelatency.
+match separately-loaded full expert models on domain benchmarks within a fewpoints,while
+cutting swap time fromseconds tounder 100 ms and fitting 5-10experts in16 GB.
+·H3(PredictionbeatsFIFo)—A next-expert predictorplusprefetchreduces user-visibleload
+latency(cold-missrate)substantially versus FiFO eviction on realistic multi-turn workloads.
+·H4(Coordinationislearnable)—Asmalldistilled coordinatoremitsvalid structuredroutes
+and merges expert outputs into answers preferred overa single mid-size model run alone,at
+lower memory.
+Eachhypothesismapstoa measurable experiment inSection9.Anegativeresult is stillinformative:
+if H2 fails for a domain, that domain keeps a full separate model; if H3 fails,MOK falls back to a
+strong heuristic cache.
+
+===== page_07.png =====
+4.TrainableComponentI-TheRouter(Expanded)
+part of MoK because every request passes through it and a wrong route costsboth quality and a
+model swap.This section turns the v1 sketch into a buildable spec:features,data volumes,training
+configuration,calibrationprocedure,deploymentpath,and the evaluationharness that decides
+whethereachstageactuallywon.
+4.1Stagedbuild-heuristicfirst,learnedlater
+Stage
+Whatitis
+Why this order
+Exit criterion
+RO-Rules
+Keyword/regex + modality detection
+Ships dayone,generates
+Loop green; traces
+(image attached-> vision;code
+the first labeled traces,sets
+logging;routing F1
+fences -> coder). Lives in
+the baseline tobeat.
+measured on the eval
+src/mok/routing/router.py.
+slice.
+R1-
+Embed the prompt; nearest-centroid
+No training data needed
+Beats R0 recall on
+Zero-shot
+or LLM-as-classifier over expert
+yet;better recall on
+paraphrase slice;
+descriptions.
+paraphrases than rules.
+used as escalation
+tier.
+R2 -Trained
+Smallencoder+multi-label headover
+Fast (<5 ms), cheap, the
+Beats R0/R1 on F1
+classifier
+experts,calibrated,with a cost head.
+workhorse once traces
+and regret;calibration
+exist.
+ECE<0.05;
+shadow-mode clean
+for 2 weeks.
+R3-Bandit /
+Policy optimizing quality minus
+Closes the loop on cost;
+OPE shows >= 2%
+offline RL
+latency andmemory penalties.
+learns from outcomes,not
+reward win over R2
+just labels.
+with no slice
+regression;H1 target
+met.
+4.2R2indetail:thetrainedclassifier
+4.2.1Backboneandheads
+Default backbone: BAAl/bge-small-en-v1.5 (33 Mparams, 384-dim pooled output). Fallback to
+MiniLM-L6 (22 M) if CPU latency is the binding constraint, or step up to gte-base (110 M) only if F1
+plateausbelowtarget.Freeze thebackboneforthefirst trainingruns;unfreeze the toptwolayers
+only if the frozen model underperforms, since unfreezing triples training cost and risks overfitting
+small trace sets.
+Twoheadssit onthepooledembeddingconcatenatedwithstructuredfeatures:
+not single-label,because real tasks combine needs("read this screenshot and write the code”
+-> vision + coder).
+·Cost head—MLP 384+F->128->(4 latency buckets + 4 VRAM buckets).Lets downstream
+policy trade quality against cost without a second model.
+4.2.2 Input features
+Feature
+Definition
+Encoding
+Latest user turn
+Truncated to 512 tokens; the primary signal.
+Backbone embedding
+
+===== page_08.png =====
+Feature
+Definition
+Encoding
+History summary
+Compressed summary of the last 3 turns (running
+Backbone embedding
+summary kept by the coordinator).
+(concatenated or
+averaged)
+Modality flags
+has_image,has_file,has_audio.
+Binaryfeatures
+code_ratio
+Fractionof charactersinsidecodefences/inline
+Float 0-1
+code.
+doc_len_bucket
+Length of attached context (none / short / long).
+One-hot,3buckets
+Residentexperts
+Bitmask of currently loaded experts-lets the
+N_experts binary
+routerprefer an already-loaded expert when
+features
+quality is close (learned cache affinity).
+VRAM pressure
+CurrentpressurefromBudgetManager,bucketed.
+One-hot,4 buckets
+4.2.3Targets,loss,and training configuration
+Targets are abinaryvectorovertheexpertset,withoptional steporderingformulti-steptasks
+handled by the coordinator,not the router.Distant labels(Section 8.2)get loss weight 0.5;
+teacher-labeled and trace-derivedgold labelsgetweight1.0.
+#R2 training sketch (PyTorch / HF)
+enc = AutoModel.from_pretrained(*BAAI/bge-small-en-v1.5′)
+# frozen first run
+feat = concat(pool(enc(text)), structured_features)
+# 384 + F dims
+head = MLP(in=384+F, hidden=256,out=N_experts)
+# multi-label logits
+cost = MLP(in=384+F, hidden=128, out=8)
+#4 lat + 4 vram buckets
+loss = w_sample * BCEwithLogits(route_logits, y_route, pos_weight=cls_w)\
++0.2 *CE(cost_logits,y_cost)
+opt = Adamw(1r=2e-4 heads / 1e-5 backbone-if-unfrozen,wd=0.01)
+schedule = cosine,3-5 epochs,batch 256,bf16, label_smoothing=0.05
+T = fit_temperature(val_logits, val_labels)
+# post-hoc，per-expert
+Item
+Starting value
+Notes
+Cold-start data volume
+30k teacher-labeled + 100k
+Section 8.2; refresh with logged
+distant-labeled
+tracesmonthly
+Validation split
+5k stratified by expert + 2-3k
+Hard cases never enter training
+hard-case slice
+Class weighting
+Inverse-sqrt frequency
+Protects rare experts (vision, tools)
+Train time/hardware
+<30min on one consumer GPU;
+Retraining is cheap-do it often
+CPU feasible
+Export
+ONNX, int8 dynamic quantization
+Target<5ms CPU inference
+4.2.4Calibrationandtheconfidencecascade
+Fit temperature scalingper expert on the validation split so confidence ismeaningful (target ECE<
+0.05).Then choose two thresholdsperexpert bysweeping theprecision/cost curve:
+·tau_high—lowest threshold at which routing precision>=0.95on validation.Above it,route
+directly.
+·tau_low—below it, the prompt is ambiguous:escalate to the R1LLM-judge router or ask the
+coordinatortoplanexplicitly.
+p = sigmoid(route_logits / T)
+#calibrated per-expert probabilities
+if max(p) >= tau_high:
+route = topk(p,thresholded)
+#fast path,<5ms
+elif max(p) >= tau_low:route = R1_1lm_router(request)
+# slow path, ~100s of ms
+
+===== page_09.png =====
+else:
+route = coordinator.plan(request) # full decomposition
+This cascadekeeps thecommon case under5mswhileprotecting tail accuracy.Track thefraction
+of requests taking each path;if more than~15%escalate,the classifier needs more data on the
+escalating slice.
+4.2.5Deploymentandmonitoring
+·Shadow modefirst—run R2alongside R0for1-2weeks,logging both decisions and(where
+measurable)counterfactualquality.PromoteR2only whenshadowF1andregretbeatR0with
+no sliceregression.
+·Drift monitoring—per-expert precision/recall on fresh traces weekly;population-stability
+index on the confidence histogram; alert on shift,retrain monthly oron alert.
+·Versioning—router checkpoints areregistry assets like any expert:name,version,
+training-data snapshot hash,eval scores.Roll back is a config change.
+4.3R3indetail:thecost-awarepolicy
+R2 predicts what is relevant; R3 learns what is worth it. Model the router as a contextual bandit:
+context =request features +system state (resident experts,VRAM pressure),action=route,reward
+as below.Train offline from logged traces to avoid riskyexploration on user hardware.
+reward = quality_score
+#0..1, from verifier/judge/end-task
+- 0.15 * normalized_latency
+#vs p95; includes load/offload time
+-0.1e*swap_occurred
+# penalize cold misses
+      #
+4.3.1Datarequirementsbefore startingR3
+·Volume —>= 50k routed traces with quality labels(Section 8.3),spanning at least 8 weeks of
+workloadvariety.
+·Counterfactuals—>=5krequestswherealternaterouteswereactuallyexecutedoffline
+(oracle runs on a sampled subset)-without these,off-policy estimates are unidentifiable for
+never-taken routes.
+4.3.2Method:DPO-on-routesfirst,value-based RL second
+Start withpreference optimization,whichis stable andreuses theR2backbone:forthesame
+"rejected”;apply a DPO-style objective on the router'sroute-head logits (beta 0.1-0.3,Ir5e-6,1
+epoch,train the head only).If preference data is too sparse,fall back to fitting a reward model and
+ConservativeQ-Learningoverlogged transitions.
+4.3.3Off-policyevaluationgate
+doubly-robustestimators.Deployment gate:estimatedrewardwin>=2%overR2withconfidence
+intervals excluding zero,and no regression on any eval slice.After deployment, allow epsilon= 0.05
+exploration only on low-stakes requests (short prompts,no tools,no high VRAM pressure)to keep
+fresh off-policy data flowing.
+4.4Theroutingevaluationharness
+Routing eval thatkeepsyou honest
+Oracle routing:fora held-out set,actuallyrun every expert and record which produced thebest answer.
+bottleneck.Track it every iteration.
+
+===== page_10.png =====
+·Oracle protocol—1-2k held-out prompts stratified across domains,multi-label cases,and
+ambiguous cases.Run every expert on each(batched ona rented cloud GPU-this is the
+·Reported metrics—multi-label F1vs labels;regret vs oracle;regret per slice(per-domain,
+multi-label-only.ambiguous-only);escalationrate;route decisionlatencyp50/p95.
+·Cadence—every router changereruns theharness;results land inthenightlyreport(9.3).
+
+===== page_11.png =====
+5.TrainableComponentIl-TheCoreCoordinator(Expanded)
+The coordinatoris the always-residentbrain.It owns three jobs therouter does not:decomposition
+(break a multi-steprequest into sub-tasks),structured routing (emit machine-readable calls the
+structured output.
+5.1Capabilitytargets
+·Plan: produce a short,valid task graph (which experts, in what order, with what inputs);
+maximum plan depth 4 steps.
+·Emit structuredroutes:strict JSON conforming to themok.route.v1schema,validated by the
+orchestrator;near-zero malformed-outputrate.
+·Merge&critique:givenexpert outputs(possibly conflicting),produce thefinal answer and a
+confidence;flag when tore-route.
+·Statehygiene:maintain a compact running task summary across turns so the memorybus
+stays small.
+5.2Themok.route.v1schema(freezeitearly)
+schema.Freezev1before generating training data;version any change.
+"schema":"mok.route.v1",
+"plan":[
+"output_key":"img_desc"}，
+{"step":“2,”"expert":"coder","input":"$img_desc + $request",
+"output_key":"code"}
+]，
+"direct_answer": false,
+//true => core answers, no expert call
+"merge_policy":"sequential",// sequential |best_of |synthesize
+"confidence":0.82,
+"state_update":"User is reproducing a chart from a screenshot in Python."
+Theorchestratorvalidateswithjsonschema.Onvalidationfailure:oneretrywiththevalidatorerror
+appended to theprompt;on second failure,fallback to the Ro deterministicroute and log the event
+(thisis atracked metric,not anexception).
+5.3Teacher trace generation pipeline
+Stage
+Detail
+Sourcerequests (15-25k)
+sources),20%logged real traffic once it exists.
+Teacher generation
+A frontier model produces plan + route (schema-constrained) + expert calls +
+mergedanswer.Where real experts are not yetserving,theteacherrole-plays
+the expert;such traces set meta.simulated=true and are down-weighted or
+phased out as real expert outputs become available.
+Verificationstack
+(1) Schema validation-hard drop on failure.(2) Code steps must pass
+generated unit tests.(3) Math steps checked against verified answers.(4)
+Mergequalityscored byajudgemodel different fromtheteacher.Expect to
+keep 60-80% of raw generations.
+
+===== page_12.png =====
+Stage
+Detail
+Budget
+Roughly $200-600 in API spend for 20k verified traces at mid-2026 frontier
+pricing;regenerate therejected slice once,then stop.
+Splits
+90/5/5 train/val/test,split by request cluster(not by trace)to prevent
+near-duplicate leakage.
+5.4Step1-Superviseddistillation(SFT)
+Item
+Startingvalue
+Notes
+Base model
+Qwen2.5-3B-lnstruct
+Step to 7B / Llama-3.x-8B only if
+validity ormergequality misses
+gates at 3B
+Method
+QLoRA r=32, alpha=64
+NF4 double-quant, bf16 compute
+LR/schedule
+1e-4, cosine,3% warmup
+Paged AdamW 8-bit
+Epochs/seq/batch
+2 epochs, 4k seq, effective batch
+Sequence packing on;loss
+64
+maskedto assistant tokensonly
+Held-out gates
+Schema-validitytestset+
+Both run every checkpoint to catch
+merge-quality judge set
+regressions
+5.5Step2-Preferencetuning(DPO)
+·Pair construction—(a) sample the SFTcoordinatorat temperatureO.8,four trajectoriesper
+request, score each with reward = correctness-cost penalties,pair best vs worst when the
+3-10k pairs.
+·Recipe—DPO at Ir 5e-6,beta 0.1,1epoch on the SFT checkpoint.KTO is thefallback if
+clean pairs are scarce (it accepts unpaired good/bad examples).
+WhatDPobuys—thisiswhere thecoordinatorlearns toavoid expensiveover-routing-
+imitationalonecopiestheteacher'shabitof usingmoresteps thanneeded.
+5.6Inferencehardening
+·Constraineddecoding—enforcetheJSONschemaatgenerationtimewitha
+grammar-constraineddecoder(e.g.outlines/xgrammar/llama.cppgrammars).With
+constraints,structural validity should exceed 99.9%;the SFT model still needs tobe good so
+that constrained outputs are semantically right,not just parseable.
+deterministicR0fallbackonrepeatedfailure.
+Acceptance gates(T3done)—structured-output validity>=99%unconstrained and >=
+on the mixed-task set;noregression on single-expert requests.
+Why distill instead ofprompt
+and large(needs a capablebase resident).Distillation moves thebehaviorintoa small,fast,
+reliably-formatted resident model - directly serving the 16 GB budget.
+
+===== page_13.png =====
+6.TrainableComponent Ill-TheLoRAExpertLibrary
+(Expanded)
+This is how“memory-efficient MoE"becomes literal. Instead of N full models each costing several
+GB, host one shared quantized base (a 7-8 B model in 4-bit, ~4.5 GB) plus a library of LoRA
+adapters (tens to low-hundreds of MBeach) that swap in milliseconds.The adapter swap-not a full
+model load-becomesMOK'sprimaryload/offload primitivefortextexperts,turning thebudget
+manager'sjobfrom“move gigabytes"into“attacha small delta."
+6.1Choosingthesharedbase(aone-waydoor)
+Every adapter binds toonebase;changing thebaselater meansretraining the entirelibrary.Decide
+maturity,context length,and native tool-calling priors.
+Candidate
+License
+Assessment
+Qwen2.5-7B-Instruct
+Apache-2.0
+Default choice: strong code/math,128k context,healthy
+quantized-quality record,unrestricted license.
+Llama-3.1-8B-Instruct
+Llamalicense
+Strong general quality;license termsmust be checked
+against distributionplans for adapters.
+Mistral-7B-Instruct-v0.3
+Apache-2.0
+Clean license, older generation; acceptable fallback if
+Qwen quantizes poorly on target hardware.
+Decisionprocedure:quantize eachcandidate toNF4,run theper-domaineval suitezero-shot on the
+16GBtarget,andpick thebest qualityxlicensexspeed product.Write theresult up as a one-page
+decision memo(kickoff Day8,Section 13)-thisis the single most consequential early decision in
+the training track.
+6.2Expertrosterandthehybridprinciple
+Expert
+Realization
+Approx.VRAM
+Swapcost
+Core coordinator
+Small instruct model, resident (own
+~2-4 GB (4-bit)
+n/a (resident)
+weights)
+Coder
+LoRA on shared base
+adapter~80-250
+<100 ms
+MB
+Instruct
+LoRA on shared base
+adapter~80-250
+00>
+MB
+Reasoning
+LoRA on shared base (math/CoT)
+adapter~80-250
+<100ms
+MB
+Tool-use
+LoRA on shared base (function
+adapter~80-250
+<100ms
+calling)
+MB
+Memory/RAG
+LoRA on shared base (grounded
+adapter~80-250
+<100ms
+QA)
+MB
+Vision (VLM)
+Separatemodel-differentbase
+~4-8 GB
+seconds (full load)
+Key decision:hybrid,notpurist.Textexperts shareonebaseviaLoRA-cheap,fast,manyfit in
+16GB.Vision needs amultimodalbase,so it stays a separatefullmodelloaded on demand.This
+hybrid is the pragmatic reading of“memory-efficient MoE":adapters where they work,full models
+onlywherethearchitectureforcesit.
+
+===== page_14.png =====
+6.3Per-expert trainingrecipes(QLoRA)
+Common settings for all adapters: NF4 double-quant base (frozen), bf16 compute, target modules
+AdamW8-bit,effective batch64via gradient accumulation,loss onresponse tokens only,early stop
+on theheld-out domain eval.Each adapter trains inhours on onerented A100/H100.
+Expert
+Corpus(deduplicated,
+Rank/
+Eval&acceptance
+decontaminated,permissive-license)
+seq
+Coder
+Code-instruction data in the OSS-Instruct
+r=64, 8k
+HumanEval+/ MBPP+ plus a
+/ Magicoder style (~75k), filtered
+private repo-task set; accept if
+evol-code data, commit/diff and bug-fix
+>=base+10 pts or within ~5 pts
+pairs (CommitPackFT subset);~100-150k
+of a dedicated 7B coder.
+examples after dedup.
+Reasoning
+Chain-of-thought math and logic with
+r=64, 4k
+Held-out GSM8K/MATH slices;
+verifiedfinal answers
+acceptonclear win overbase
+(GSM8K/MATH-style,
+and no instruct regression.
+MetaMath/Numina-style augmentation);
+～150k.
+Instruct
+Curatedhigh-quality general
+r=16, 4k
+IFEval + judge-based preference
+instruction-following,30-50k,aggressively
+vsbase;acceptonpreference
+deduplicated; no benchmark-adjacent
+win.
+data.
+Tool-use
+Function-calling traces (request -> valid
+r=32, 4k
+Schema validity >= 98%;
+tool JSON -> result -> answer), ~40k,
+BFCL-style task success; correct
+including 20% no-tool negatives.
+abstention onno-tool cases.
+Memory/RAG
+Retrieval-grounded QAwhere answers
+r=32,8k
+Grounded-QA accuracy;
+must cite provided context,with 15-20%
+abstentionF1;hallucinationrate
+answer-not-in-context negatives to train
+<5% on adversarial
+abstention.
+unanswerables.
+Train coder and instruct first(T2):coder shows thebiggest gapvsbase and instruct is the workload
+majority.Reasoning,tool-use,and RAG follow once the serving and eval loop has digested the first
+two.
+6.4 Serving the library
+·Stack—vLLM with LoRA enabled (--enable-lora --max-loras 6--max-lora-rank 64) as the first
+choice;LoRAX or an S-LoRA-style serverif vLLM multi-adapter contention disappoints on the
+16 GBcard.
+·Benchmarkstorunearly(theyshape thewholememorydesign)—adapterattach/detach
+switching mid-stream.These numbers determinehow manytext experts canbe hot at once.
+Registryintegration—extend ExpertMetadata withkind(full|adapter),base_id,
+adapter_path,andrank.TheBudgetManager charges adapters near-zeroVRAMagainst the
+budget whilethesharedbaseischarged once-thismakesadapterexpertseffectivelyfree to
+keepresident,which theevictionpolicy(Section7) shouldexploit.
+6.5Thecapacityceilingand theescalationpath
+Capacity caveat (test H2 honestly)
+
+===== page_15.png =====
+Adapters add capability but not unlimited capacity. If the coder adapter underperforms a dedicated full code
+low-confidence tail, and let the LoRA coder handle the common case.Measure the gap before deciding.
+Make the escalation mechanical:route to theLoRA coderby default;if its self-reported confidence is
+escalation-theescalationrateis theempirical measure of H2,perdomain.
+
+===== page_16.png =====
+7.TrainableComponentsIV&V-MemoryPolicyandCost
+Model (Expanded)
+7.1Next-expertpredictionandprefetch
+ignoreswhichexpert is about tobeneededagain,causing avoidablecoldmisses.Conversations
+have structure-a debugging sessionkeepshiting the coder;a document task alternates RAG and
+instruct. Exploit it in two stages:
+expert callswithLaplace smoothing.Establishes the predictabilitybaseline of real workloads
+before any neural model is justified.
+·P1-tinyTransformer—2layers,d_model128,4heads,<1Mparameters.Inputs:the last 8
+80%.If P0 already hits these, skip P1.
+expected_load_saving_ms exceeds the staging cost.In practice: prefetch adapters at P >= 0.4 (they
+are nearly free), and the full vision model only at P >= 0.6 (it is multi-GB and evicting forit is
+H3 is likely to hold.
+7.2Learnedeviction
+ReplaceFIFOwitha value estimate:evict theresident expert with thelowest predicted near-future
+# Eviction as scoring (drop-in upgrade to request_allocation_clearance)
+score(e)= w1 * P_next_use(e |context)
+#from predictor (Po/P1)
+-w2 * reload_cost(e)
+# adapter cheap,ful1 model dear
++ w3 * is_resident_core(e) * INF
+#never evict core
+evict = argmin(score) over IDLE
+# ACTIVE-aware later
+The scored heuristic above is stage one and maybe allthat is ever needed.Stage twoformalizes it
+{evict_i, keep, prefetch_j};reward =-(miss latency ms /1000)-0.05x memory pressure -5.0 x
+OOM.Train with ConservativeQ-Learning on logged traces so the policy neverexplores
+dangerously on a user's GPU.
+cold-miss and latency deltavsFiFO.Everymemory-policy candidate is evaluated onreplay
+first;onlyclearwinnersreachaliveA/B.
+·Safetyinvariants(hard-coded,notlearned)—neverevictRESIDENTorACTIVE;never
+exceed theVRAM ceiling;FIFO remains the always-available fallbackbehind a config flag.
+7.3TheVRAMcostmodel
+The registry stores a static vram_cost_gb.Real footprint =weights+KV-cache,and theKV-cache
+conservative) or risks OOM (too optimistic).Build a tiny calibrated estimator:
+vram(model，ctx_len,batch)~= weights_gb
++kv_per_token_gb（model)*ctx_1en *batch
++ activation_overhead_gb(model)
+
+===== page_17.png =====
+·Install-time profiling—for each model,runa grid over ctx in{512,2k,4k,8k,16k}xbatch in
+{1,2,4},recording torch.cuda.max_memory_allocated.Fit the linear coefficients per model.
+Takesminutespermodel,once.
+·Onlinerefinement—updatecoefficientsfromobservedpeak-memorytelemetrywitha
+residual), and keep >= 1 GB of the landing zone as hard headroom.
+·Integration—registry stores theper-model coefficients;calculate_vram_pressure and
+request_allocation_clearancetakethecurrentcontextlengthinsteadofusing thestatic
+number.OoM under the specworkloadbecomes a release-blocking Cl test(the long-session
+16k-context coding scenario inSTRESS-LONGCTX,Section9.3).
+This single changeis the differencebetweena demo that survives shortprompts and aruntime that
+survivesalongcodingsession.
+
+===== page_18.png =====
+8.Data-TheAssetThatMakesEverythingElseWork
+(Expanded)
+None of the learned components exist without data,and most of it must be built,not downloaded.
+The good news:MoK generates its own training data as it runs, if instrumented from day one.
+8.1 Trace logging schema (instrument before you train)
+Everyrequestemitsonestructured trace-simultaneously thetelemetry theREADME'sPhase5
+asksforand thetraining set fortherouter,coordinator,andmemorypolicy.
+Field
+Type
+Notes
+request_id, turn_idx
+str, int
+Session-scoped; sessions are the unit for
+memory-policy training
+request_text, modality_flags
+str, dict
+Optionally store a salted hash of text for logs that
+leave the machine
+resident_experts,
+list, float
+Systemstateatdecision time-R3and eviction
+vram_pressure_before
+features
+router_decision,
+dict, float, str
+Stage records which tier(R0/R1/R2/R3) decided-
+router_confidence, router_stage
+enablesper-tier analysis
+coordinator_plan
+json
+The mok.route.v1 object,if the coordinator ran
+experts_called,evicted,
+lists
+Ground truthfor thepredictor and evictionpolicy
+prefetched
+load_ms, offload_ms, ttft_ms,
+ ints, bool
+The cost side of every reward function in this plan
+total_ms, oom
+peak_vram_gb, ctx_len
+float, int 
+Cost-model calibration data
+final_answer, quality_label,
+str, float, str
+quality filled later by the verifier hierarchy (8.3);
+label_source
+label_sourcerecordswhichverifier
+DuckDBviews over theParquet for analysis and the evalharness.No database server,no ops
+burden.
+Discipline—the tracelogger lands before real models are wired (kickoff Day 5)so thefirst
+real requestever served is already training data.
+8.2Buildingtheroutingdataset
+Combine three sources so the router generalizesbeyond what rules already catch.Distant labels are
+weighted 0.5 in theloss; teacher and tracelabels1.0.
+Source
+What it is
+Role
+Synthetic
+Public prompts spanning domains,labeled by a
+Cold-start fuel for R2; broad
+(teacher-labeled)
+strong model with which expert(s)each needs
+coverage
+and the ideal route. ~30k to start.
+Repurposed
+Dataset-level labels:code datasets->coder;
+Volume and diversityatzerolabeling
+benchmarks
+math->reasoning;VQA/charts->vision;
+(distant labels)
+function-calling sets -> tool-use; general
+instruction ->instruct; open-book QA ->
+memory/RAG. ~100k, free, slightly noisy.
+
+===== page_19.png =====
+Source
+Whatitis
+Role
+Logged
+Real requestswithreal outcomesandquality
+The only sourcereflecting actual
+productiontraces
+6labels. Small at first.
+users; closes the R3 loop
+(gold)
+Distant-label sourcemap(all permissive orresearch-standard;verifylicensebefore
+GSM8K,MATH,ARC-Challenge.vision:VQAv2,ChartQA,TextVQA.tool-use:xLAM/Glaive-style
+function-calling sets.instruct:OpenAssistant,Dolly-15k,no-robots-style curated sets.memory/RAG:
+Natural Questions,HotpotQA,TriviaQA with provided contexts.
+image and write Python to reproduce it”-> vision + coder), ambiguous prompts,and adversarial
+paraphrases of single-domainprompts.Build 2-3kof these from composition templates;hold them
+out as a dedicated eval slice that is never trained on.Multi-label routing and confidence calibration
+liveordiehere.
+8.3Qualitylabels:theverifierhierarchy
+Everylearnedcomponent'sreward dependsonquality_label.Usethestrongest availableverifierper
+request type,inthisstrictpreferenceorder:
+1.Unit tests pass (code)-ground truth,free, automatic.
+2. Exact-match against verified answers (math,closed QA).
+3. Schema validity + execution success (tool calls).
+4.Grounded-citation check(RAG:does the answer cite the provided context,and abstain when it
+should?).
+5. LLM judge - pairwise comparisons with position-swap debiasing, run by a model different from
+the teacher(avoid eval circularity); spot-audit 5%by hand.
+solelabel.
+8.4Hygiene:dedup,decontamination,licensing
+·Deduplication—MinHash-LSH near-dedup(Jaccard ~0.8) within and across corpora,plus
+exact dedup.Duplicates inflate eval and destabilize DPO.
+·Decontamination(non-negotiable)—13-gramexact-overlapfilterof all trainingdataagainst
+counts.An inflated benchmark score is worse than a low one-it sends the roadmap the wrong
+way.
+resulting adapters are distributable.Keep a data card perexpert recording sources,sizes,
+filters,dedup/decontaminationstats,andknowngaps.
+·Versioning—datasets and adapters areversioned artifacts(DvCor HFHub).Every trained
+checkpoint records the exact dataset snapshot hash it saw-reproducibility is what makes the
+ablationclaimsinSection9believable.
+
+===== page_20.png =====
+9.Evaluation&Benchmarking(Expanded)
+answer are both failures.
+9.1 System metrics (precise definitions)
+Metric
+Definition
+Target
+Route decision time
+Walltime fromrequest receipt to routing
+< 5 ms (R2 fast path)
+decision
+Adapter/model load time
+Coldpromote toVRAM(attachforadapters)
+Adapter < 100 ms; full
+model seconds
+Ofload time
+Evict from VRAM; must never block an ACTIVE
+Minimize
+expert
+Time to first token
+Request -> first output token
+Minimize; prefetch hides
+loads
+Total response time
+End-to-end
+Minimize at fixed quality
+VRAMpressure/OOMrate
+Peak vs budget; OoM events under spec
+0OOM
+workloads
+(release-blocking)
+Cold-miss rate
+unplanned_loads /routed_requests- a route
+Down vs FIFO baseline
+needing aload theprefetcher did not stage
+(H3)
+Escalationrate
+Fraction of requests leaving the router fast path
+<~15%;rising rate =
+retrain signal
+9.2Qualitymetrics
+·Routing accuracy/regret—multi-label F1vslabels,andregret=mean(oracle_quality-
+routed_quality)vs the oracle that runs all experts(Section 4.4). Reported overall and per slice.
+·Per-domain task accuracy—each expert onitsbenchmark(code,math,grounded-QA,tool
+success,VLM tasks)-adapter vs full-model baseline (tests H2),plus the live escalation rate
+per domain.
+answers vs a single mid-size model (tests H4).
+·End-to-end—on mixed multi-domain tasks,full-MOK answer quality and cost vs(a)onebig
+model, (b) oracle routing,(c) random routing.
+9.3Thenightlyharness
+Evaluation is a fixture,not an event.A nightly run executesfour pinned suites against the current
+build and writes onereport:
+Suite
+Contents
+Whatitgates
+ROUTE-500
+500 held-out routing prompts incl.the hard-case
+RouterF1,regret,
+slice
+calibration,escalation
+rate
+DOMAIN-suite
+Per-expert benchmarks(HumanEval+/MBPP+,
+Adapter quality; H2 gap
+GSM8K/MATH slices, IFEval, BFCL-style,
+tracking
+grounded-QA)
+
+===== page_21.png =====
+Suite
+Contents
+Whatit gates
+SESSION-50
+50 scripted multi-turn sessions (debugging session,
+Cold-miss rate, TTFT,
+document-analysissession,mixed-modality
+prefetchwin,coordinator
+session...)replayed deterministically
+validity (H3, H4)
+STRESS-LONGCTX
+Long-session16k-context coding scenarioramping
+0-OOM invariant;
+contextand concurrency
+cost-model accuracy
+(predicted vs observed
+peak VRAM)
+confidence intervals on all deltas; small-model and routing results are noisy, so a delta without
+anintervalisnotaresult.
+Regressiongate—a change that drops anyheadlinemetricbeyond itsinterval blocksmerge.
+The heuristic fallbacks(R0 routing,FIFO eviction,static cost estimate)stay runnable forever
+behind config flags-they areboth the safety net and the permanent ablationbaseline.
+9.4Theworkloadsimulator
+Before there is enoughreal traffic, memory-policy claims need a workload.Fit a small Markov
+(debugging stays in code;document workalternatesRAG and instruct).The simulator drives the
+offlinereplayevaluation in7.2 and lets eviction/prefetchpoliciesbecomparedon thousands of
+resultsarenotlaunderedthroughastalesimulator.
+9.5Baselines,ablations,andthereport
+·Always-onbaselines—a singlestrongmodeldoingeverything;oraclerouting(quality
+ceiling);random/round-robin routing(floor);FiFO eviction(memorybaseline);static cost
+model.
+·Ablationrule—everylearnedcomponent mustbeindividuallyrevertibletoitsheuristic.The
+claim“componentXwins"means:identical build,X swapped foritsheuristic,nightly suites
+rerun,deltaattributed.Nobundledwins.
+Benchmarkreport—onepageperrelease:qualityaxis andcost axissidebyside,
+
+===== page_22.png =====
+10.Infrastructure,Tooling & Hardware
+Need
+Recommendedstack
+Whereitruns
+Runtime serving
+vLLM (LoRA), LoRAX, or S-LoRA-style
+16 GB consumer GPU
+multi-adapter server
+(target)
+Adapter training
+HF transformers + PEFT + TRL; Unsloth or Axolotl
+Rented single
+for speed; bitsandbytes (QLoRA)
+A100/H100
+(hours/expert)
+Coordinator distillation
+Teacher via APl;SFT+DPOwith TRL
+Cloud GPU
+Router training
+PyTorch + sentence-encoder; tiny, trains on
+Local
+CPU/oneGPU
+Experiment tracking
+Weights&BiasesorMLflow;DVC/HFHubfor data
+Local + cloud
++adapter versioning
+Telemetry/eval
+MOK trace log -> DuckDB/Parquet; nightly eval
+Local
+harness
+product.Training the 7-8 B QLoRA adapters and the coordinator wants 24-80 GB;rent it by the hour
+oraclerefresh is a quarterly batch job.Total cloud+APl budget for the full plan plausiblylands in the
+low four figures.
+11.IntegratedRoadmap(Expanded:24weeks)
+Engineering(E)and training(T)milestonesinterleave so the learning track always hasaruntime
+and traces to learn from. E1-E5 mirror the README's phases;T1-T5 are the training track. The
+week numbers assume part-time solo effort with cloud bursts; compress at will,but do not reorder
+across gates.
+Weeks
+Phase
+Deliverables(tied torepopaths)
+Gate/definitionof
+done
+1-2
+E1
+src/mok/models/backends.py (mock + HTTP
+pytest green;loop
+backends),src/mok/orchestration/runtime.py
+returns the documented
+(the documented loop),
+response shape
+configs/example_experts.json; tests for each.
+end-to-end with mocks.
+3-4
+E2
+vLLM/LoRAX serving wired for two real
+Two real experts answer;
+models; src/mok/telemetry/events.py trace
+traces queryable in
+logger (8.1) on every request; nightly JSONL ->
+DuckDB.
+Parquet compaction.
+5-6
+T1a
+R0 rules in src/mok/routing/router.py; oracle
+Regret vs oracle is the
+eval hamess;first ROUTE-500+regret
+headline metric,
+measurement; routing dataset build scripts
+measured and plotted.
+(distant labels).
+7-8
+T2a
+Base-model decision memo (6.1); coder +
+Each adapter >=
+instruct adapters trained;vLLMhot-swap and
+acceptance bar (6.3);
+concurrent-adapterbenchmarksonthe16GB
+adapter swap<100ms
+target.
+measured.
+
+===== page_23.png =====
+Weeks
+Phase
+Deliverables(tied torepopaths)
+Gate/definitionof
+done
+9-10
+T1b
+R2 classifier trained on synthetic+ distant data;
+R2 beats R0 on F1 and
+temperature calibration;confidence cascade;
+regret;ECE<0.05;
+shadow deployment alongside R0.
+shadow clean for 2
+weeks.
+11-12
+3
+Install-time VRAM profiler; calibrated cost
+0OOMon the
+model wired intoBudgetManager
+long-session stress test;
+(calculate_vram_pressure takes ctx_len);
+predicted vs observed
+STRESS-LONGCTX in CI.
+peak within the safety
+quantile.
+13-16
+T3
+mok.route.v1 frozen;20k verified teacher
+Validity >= 99% (>=
+traces;coordinator SFT then DPO;constrained
+99.9% constrained);
+decoding in the serving path.
+merges preferred >=
+60% vs solo model.
+17-18
+T4
+P0n-gram predictor+prefetch;replay
+Cold-miss rate down vs
+simulator(9.4);scored evictionreplacing FIFO;
+FIFO on SESSION-50
+P1 only if P0 underperforms.
+and replay;FIFO fallback
+flag retained.
+19-20
+T5
+DPO-on-routes (R3) trained from >= 50k
+OPE win >= 2% with CI
+labeled traces+counterfactual slice;OPE
+excluding zero; H1
+report; gated rollout with epsilon =0.05
+checked:>=95%oracle
+low-stakes exploration.
+quality at < 40% oracle
+latency.
+21-24
+E4/E5
+Vision expert as on-demand full model;
+End-to-end MOK beats
+remaining adapters(reasoning,tool-use,RAG);
+single-model and
+full benchmark report with ablation matrix(9.5).
+random-routing
+baselines; H1-H4 status
+documented.
+Sequencing rule
+Never start a T-phase before its E-dependency logs usable traces, and never declare a T-phase done
+without an ablation showing it beats the heuristic it replaced. If a week's gate fails,the schedule slips - the
+gates do not.
+12. Risks & Mitigations
+Risk
+Mitigation
+Scope creep -building a framework, not a
+Hold the repo boundary (src/mok only); every phase ships a
+runtime
+runnable, tested loop
+Router cold-start - no data to train on
+R0/R1heuristicsrun first and generate thelabeled traces R2
+needs
+Eviction thrash underreal workloads
+Predictor+prefetch;learned eviction trained offline on
+replay:FIFO stays as safe fallback
+VRAM estimate wrong -> OOM
+Calibrated cost model with context-length term;
+LoRA capacity ceiling on hard tasks
+Hybrid: heavyweight full expert for the low-confidence tail;
+escalationratemeasures theH2gap continuously
+
+===== page_24.png =====
+Risk
+Mitigation
+Distillation copiesteachermistakes
+Verify traces(tests for code,checked answers for math);
+DPO on outcome-based preferences
+Base-model choiceregretted afteradapters
+Treat 6.1 as a one-way door: quantized bake-off + decision
+trained
+memobeforeany adaptertraining
+Visionwill notfit the adapter trick
+Treat VLM as a separate on-demand full model from the
+start;donot force it onto the shared base
+Eval circularity (judge == teacher)
+Different judgemodel;position-debiasedpairwise;
+human-checked holdouts; prefer task-grounded metrics
+(tests pass, answer correct)
+Simulator divergence launders
+Report simulator-vs-real divergence; final claims require
+memory-policyresults
+SESSION-50on therealruntime
+
+===== page_25.png =====
+13.lmmediateNextActions-a14-DayKickoff
+is committed and runnable. Days assume focused part-time effort; pairs of days collapse for full-time.
+Day
+Task
+Done when
+1-2
+Implement src/mok/models/backends.py:a
+Unit tests pass for both backends
+MockBackend returning canned responses and an
+HTTPBackend stub against the registry's api_url
+contract.
+3
+Implement src/mok/orchestration/runtime.py:prompt
+The documented loopruns
+->core chooses expert->budget clearance->idle
+end-to-end
+offload -> expert load -> mock response.
+4
+Write configs/example_experts.json(core,coder,
+pytest green= E1 Definition of Done
+instruct,vision entries with realistic costs);finish E1
+testcoverage.
+5
+Addsrc/mok/telemetry/events.pyimplementingthe
+Everyrequest emits onevalid trace
+trace schema (8.1); wire into the loop; JSONL out,
+with the Parquet compaction script.
+6
+Stand up Rorules routing in src/mok/routing/router.py
+R0 routes the example expert set
+with its own unit tests (keyword, regex, modality
+correctly
+cases).
+Build the oracle-eval harness skeleton:prompt set
+Harness runs against mocks;regret
+loader, run-all-experts driver (mock for now), regret
+=0 sanity check
+computation, report output.
+8
+Quantized base bake-off (6.1): NF4-quantize the
+Base model chosen and documented
+candidates,runzero-shot domainevalsonthe 16GB
+target, write the decision memo.
+6
+BenchmarkvLLMLoRAhot-swapon the chosen
+Numbers recorded; serving stack
+base:attach latency,concurrent-adapter throughput,
+confirmed or swapped
+TTFT impact.
+10
+Write therouting-dataset build script:distant-label
+~100k distant + splits on disk with a
+mapping,dedup,decontamination filter,
+data card
+train/val/hard-case splits.
+11
+Launch the first coder-adapterQLoRArun onrented
+Training running; synthetic set
+GPU (6.3recipe);meanwhile generate the 30k
+landing
+teacher-labeledrouting set.
+12
+Write theR2 training script(4.2)end to end:features,
+Trains on the distant-label set without
+heads,loss, calibration, ONNX export.
+error
+13
+Train R2 on full cold-start data; calibrate; run
+First real regret number for a learned
+ROUTE-500; measure F1 and regret vs R0.
+router
+14
+Evaluate the coder adapter vs base
+Go/no-go on T2 acceptance; plan
+(HumanEval+/MBPP+);write up week-2 results;revise
+v2.1 notes
+Section11 dates against reality.
+This plan extends the MOK README and CLAUDE.md; it does not replace them.The runtime
+contract thereremains the source of truthfor the engineering track,and this document is the source
+of truth for what to train,how, and how to prove it works.

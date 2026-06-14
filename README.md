@@ -1,384 +1,61 @@
-# Model Operating Kernel (MOK)
-
-> A multi-model runtime architecture for building one usable AI system out of several specialized models: a resident core coordinator plus expert models for instruction, coding, vision, tools, memory, reasoning, and future domains.
-
-**Model Operating Kernel (MOK)** is a runtime layer for split loading, offloading, routing, and resource budgeting across independent model assets.
-
-The first goal is simple and concrete:
-
-> **Build a working local model system that can load, offload, route, and coordinate multiple expert models under constrained hardware.**
-
-A traditional Mixture-of-Experts model routes between experts inside one trained model. MOK explores a runtime-level version of that idea: separate specialist models are treated as managed expert assets coordinated by a core process.
-
----
-
-## Current build priority
-
-The project is now split into two tracks:
-
-1. **Runtime MVP — build now**
-   - model registry
-   - memory budget manager
-   - mock backends
-   - orchestration loop
-   - telemetry
-   - FastAPI/CLI entrypoint
-
-2. **Research / training track — later**
-   - trained router
-   - trained core coordinator
-   - memory-policy learning
-   - expert fine-tuning
-   - oracle evaluation
-   - adapter-vs-full-model comparisons
-
-Read these two docs first:
-
-- [`docs/runtime_mvp.md`](docs/runtime_mvp.md) — the immediate build contract.
-- [`docs/research_plan.md`](docs/research_plan.md) — the later training and evaluation track.
-
-The runtime must work before training starts.
-
----
-
-## The core idea
-
-A MOK system has three major parts:
-
-1. **Core coordinator model**
-   - The always-on controller.
-   - Understands the user request.
-   - Decides which expert model is needed.
-   - Maintains task state and final response control.
-   - Should usually stay `resident` in VRAM.
-
-2. **Expert model pool**
-   - Specialist models for different capabilities.
-   - Initial targets: instruct, coding, vision, reasoning, tool use, and memory/retrieval.
-   - Experts may be local LLMs, VLMs, quantized models, adapters, mock backends, or external backend processes.
-
-3. **Load/offload manager**
-   - Keeps the system inside hardware limits.
-   - Loads the needed model or expert.
-   - Offloads inactive experts.
-   - Tracks RAM, VRAM, cache state, route cost, and lifecycle state.
-
-The point is to make a working model-of-models runtime.
-
----
-
-## Why this exists
-
-Local AI systems are becoming more capable, but they are still awkward when one task needs multiple abilities.
-
-A strong coding model may be weak at vision. A vision model may be weak at long instruction following. A small instruct model may be fast but unable to handle deep code. A large model may be powerful but too expensive to keep loaded all the time on a 16GB GPU.
-
-MOK solves that at the runtime level.
-
-Instead of forcing one model to do everything, MOK treats models like managed compute resources:
-
-- load the expert needed now
-- offload what is not needed
-- keep a small/core coordinator available
-- pass structured state between experts
-- prevent VRAM crashes
-- measure routing and load costs
-- make the system feel like one coherent model
-
----
-
-## What MOK is
-
-MOK is a **runtime-level MoE-style architecture**.
-
-It coordinates multiple independent models as if they were expert regions of one larger system.
-
-Examples:
-
-| User need | Core decision | Expert used |
-|---|---|---|
-| Write or debug code | route to code expert | coder model |
-| Explain a general question | stay with core or instruct expert | instruct model |
-| Analyze an image | load vision expert | vision model |
-| Use a local tool | route to tool executor | tool model / tool layer |
-| Retrieve project memory | route to memory expert | retrieval model |
-| Multi-step task | coordinate several experts | core + selected experts |
-
-This is related to Mixture-of-Experts in spirit, but it is not limited to one trained MoE model. MOK manages a pool of real models at runtime.
-
----
-
-## What MOK is not
-
-MOK is **not**:
-
-- a LoRA-only adapter router
-- a prompt-chain framework
-- a chatbot personality system
-- a LangChain clone
-- a research note pretending to be a product
-- a wrapper that assumes unlimited GPU memory
-
----
-
-## Target architecture
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                      USER / APP LAYER                       │
-│        chat UI, API call, local workflow, automation         │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  CORE COORDINATOR MODEL                     │
-│   understands task, keeps state, chooses expert, merges work │
-└───────────────┬──────────────────────────────┬──────────────┘
-                │                              │
-                ▼                              ▼
-┌─────────────────────────────┐   ┌───────────────────────────┐
-│      MODEL ROUTER            │   │    MEMORY / STATE BUS      │
-│ intent, modality, cost, risk │   │ task state, cache, context │
-└───────────────┬─────────────┘   └─────────────┬─────────────┘
-                │                               │
-                ▼                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  LOAD / OFFLOAD MANAGER                     │
-│        VRAM budget, RAM staging, model cache, eviction       │
-└───────────────┬──────────────────────────────┬──────────────┘
-                │                              │
-                ▼                              ▼
-┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────┐
-│   INSTRUCT EXPERT   │ │    CODER EXPERT     │ │ VISION EXP. │
-└─────────────────────┘ └─────────────────────┘ └─────────────┘
-┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────┐
-│  REASONING EXPERT   │ │  MEMORY / RAG EXP.  │ │ TOOL EXPERT │
-└─────────────────────┘ └─────────────────────┘ └─────────────┘
-```
-
----
-
-## First working milestone
-
-The first milestone is a minimal working MOK runtime.
-
-### Milestone 1: working multi-model loop
-
-Build a prototype that can:
-
-1. Start or simulate a lightweight core coordinator.
-2. Register multiple expert models in a model registry.
-3. Accept a prompt through an API or CLI.
-4. Decide whether the request needs core, coder, instruct, vision, or another expert.
-5. Check the memory budget before promoting an expert.
-6. Return a **non-mutating eviction plan** if memory pressure requires offload.
-7. Execute planned offloads in the runtime.
-8. Load or activate the selected expert.
-9. Run the expert or mock backend.
-10. Mark the expert idle after completion.
-11. Log route, load time, offload time, memory pressure, and final result status.
-
-### Initial expert set
-
-The first practical expert set should be:
-
-- **Core coordinator**: small instruct/reasoning model
-- **Coder expert**: code-specialized local model
-- **Instruct expert**: general instruction model
-- **Vision expert**: image understanding model or mock vision backend
-- **Memory/retrieval expert**: project/document context helper
-
-The exact models can change. The architecture should not depend on one model name.
-
----
-
-## Model lifecycle states
-
-MOK tracks models as assets with explicit hardware lifecycle states:
-
-| State | Meaning |
-|---|---|
-| `offline` | On disk only. Not staged in RAM or resident in VRAM. |
-| `staged` | Paged or prepared in system RAM. Ready for faster promotion. |
-| `resident` | Permanently held in VRAM. Reserved for the core coordinator. |
-| `active` | In VRAM and currently executing. |
-| `idle` | In VRAM but waiting. Eligible for eviction under pressure. |
-
-### Required manager behavior
-
-- Know which models are available.
-- Know which models are currently in RAM or VRAM.
-- Know estimated RAM/VRAM cost per model.
-- Load only what is needed.
-- Offload least-needed models first.
-- Preserve the resident core coordinator.
-- Avoid crashing the GPU by crossing hard memory limits.
-- Record every load/offload event.
-
-This is the heart of the project.
-
----
-
-## Current repository status
-
-**Status:** early MOK runtime scaffold  
-**Goal:** working multi-model MOK prototype  
-**Hardware target:** local consumer hardware, especially 16GB VRAM systems  
-**Primary concern:** split loading, offloading, routing, and coordination
-
-The current codebase contains the first MOK-native core pieces:
-
-- `src/mok/models/registry.py`
-- `src/mok/memory/budget.py`
-- `tests/test_model_registry.py`
-- `tests/test_memory_budget.py`
-- `docs/runtime_mvp.md`
-- `docs/research_plan.md`
-
----
-
-## Near-term build plan
-
-### Phase 1 — model registry
-
-Define each model and track scheduling metadata:
-
-- name
-- role
-- backend
-- local path or server endpoint
-- modality support
-- estimated RAM cost
-- estimated VRAM cost
-- lifecycle state
-- current device
-- pinned / can-evict flags
-- priority
-- loaded-at and last-used timestamps
-
-### Phase 2 — budget manager
-
-The budget manager must plan allocation safely:
-
-- calculate VRAM pressure
-- preserve a landing zone
-- protect resident core assets
-- prefer idle, non-pinned eviction candidates
-- return an eviction plan
-- avoid mutating registry state before actual backend offload succeeds
-
-### Phase 3 — mock backend layer
-
-Create mock experts before real model wiring:
-
-```text
-src/mok/models/backends.py
-```
-
-The first backend layer should simulate load latency, unload latency, generation latency, memory cost, and failure states.
-
-### Phase 4 — orchestration runtime
-
-Create the first coordinator loop:
-
-```text
-prompt -> classify need -> choose expert -> budget plan -> evict/load -> call expert -> merge result -> respond
-```
-
-This can begin with deterministic routing before any learned router exists.
-
-### Phase 5 — real backend integration
-
-Integrate at least two real experts:
-
-- core/instruct model
-- coder model
-
-Then add vision once the model lifecycle is stable.
-
-### Phase 6 — benchmark and prove it
-
-Measure:
-
-- route decision time
-- model load time
-- model unload time
-- memory pressure
-- time to first token
-- total response time
-- failure modes
-
----
-
-## Suggested repo direction for Claude/Codex
-
-If you are an AI coding agent working on this repo, your first job is to turn this into a working MOK runtime.
-
-Read in this order:
-
-1. `README.md`
-2. `docs/runtime_mvp.md`
-3. `src/mok/models/registry.py`
-4. `src/mok/memory/budget.py`
-5. `docs/research_plan.md` only after the runtime task is understood
-
-Start from this structure:
-
-```text
-src/mok/
-├── __init__.py
-├── core/
-│   ├── coordinator.py
-│   └── state.py
-├── models/
-│   ├── registry.py
-│   ├── lifecycle.py
-│   └── backends.py
-├── routing/
-│   └── router.py
-├── memory/
-│   └── budget.py
-├── telemetry/
-│   └── events.py
-└── api/
-    └── app.py
-```
-
-Do not assume the first implementation must use LoRA. LoRA may become one expert type, but MOK is about coordinating multiple models and managing their load/offload lifecycle.
-
----
-
-## Development commands
+# MoK-Project
+
+This folder now contains both the research pack and a runnable starter codebase for Model Operating Kernel (MoK).
+
+## What exists now
+
+- `docs/`
+  - project, architecture, training, roadmap, and kickoff docs
+- `sources/`
+  - original PDF plus OCR extract
+- `templates/`
+  - future-file templates kept for reference
+- `src/mok/`
+  - initial Python package
+- `configs/`
+  - example expert registry config
+- `tests/`
+  - basic unit tests for the first runtime slice
+
+## What the starter implements
+
+- expert registry with lifecycle states
+- simple VRAM budget manager with idle-expert eviction
+- `R0` rules router
+- mock backend plus HTTP backend stub
+- runtime loop from prompt -> route -> budget -> backend -> trace
+- JSONL trace logging
+- oracle-regret skeleton for later evaluation work
+
+## Quick start
 
 ```powershell
-git clone https://github.com/nawnie/Model-Operating-Kernel.git
-cd Model-Operating-Kernel
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e .[dev]
-pytest
+cd C:\Users\Shawn\Desktop\MoK-Project
+python -m pip install pytest
+python -m pytest -q
+python run_mok.py "write python to reverse a list"
+python run_mok.py --has-image "describe this screenshot"
+python run_mok.py --inspect-gguf C:\path\to\model.gguf
+python run_mok.py --scan-gguf-dir C:\path\to\models
 ```
 
----
+## Current goal
 
-## Core principle
+This is the first buildable layer from the roadmap, not the final architecture. It is meant to make MoK concrete enough to iterate on:
 
-A single model does not have to do everything.
+- registry shape
+- route records
+- trace logging
+- budget behavior
+- expert invocation contract
 
-MOK is the runtime that decides:
+The next logical step after this scaffold is to add a real route schema, richer trace fields, and the oracle-eval harness over actual expert outputs.
 
-- which model should think
-- which model should see
-- which model should code
-- which model should remember
-- which model should be loaded
-- which model should be offloaded
-- how the result becomes one coherent answer
+## GGUF support
 
-The first win is a working prototype. The theory comes after the model actually runs.
+The starter can now inspect GGUF model files without loading them for inference. This is useful for:
 
----
-
-## License
-
-MIT. See [`LICENSE`](LICENSE).
+- reading architecture and context length from local GGUF assets
+- identifying quantization type
+- scanning a model directory to catalog local executors
+- hydrating registry entries that point at GGUF files

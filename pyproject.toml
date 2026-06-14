@@ -1,50 +1,18 @@
-[build-system]
-requires = ["setuptools>=69", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "model-operating-kernel"
-version = "0.1.0a0"
-description = "A local-first multi-model runtime for split loading, offloading, routing, and VRAM budgeting."
+version = "0.1.0"
+description = "Starter runtime for a local model-orchestration kernel."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [
-  { name = "Shawn O'Hagan" }
-]
-keywords = [
-  "llm",
-  "moe",
-  "multi-model",
-  "runtime",
-  "kernel",
-  "vram",
-  "local-first",
-  "load-offload",
-  "model-registry"
-]
-dependencies = [
-  "fastapi>=0.111",
-  "uvicorn[standard]>=0.30",
-  "pydantic>=2.7"
-]
+dependencies = []
 
-[project.optional-dependencies]
-dev = [
-  "pytest>=8.2",
-  "ruff>=0.5"
-]
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
 testpaths = ["tests"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+pythonpath = ["src"]

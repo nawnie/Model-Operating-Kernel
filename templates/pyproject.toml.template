@@ -1,0 +1,10 @@
+[project]
+name = "model-operating-kernel"
+version = "0.1.0"
+description = "Runtime kernel for local model orchestration under constrained hardware."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"

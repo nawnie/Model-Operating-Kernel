@@ -1,0 +1,14 @@
+# Runtime serving and local system dependencies
+fastapi
+uvicorn
+pydantic
+httpx
+orjson
+duckdb
+pyarrow
+
+# Default serving direction
+vllm
+
+# Optional fallback if adapter serving needs a different stack
+# lorax

@@ -1,51 +1,5 @@
-# Python
 __pycache__/
-*.py[cod]
-*.pyo
-*.pyd
 .pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-build/
-dist/
-*.egg-info/
-.venv/
-venv/
-.env
-.env.*
-
-# OS / editor
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-# Exclude volatile model files and heavy runtime checkpoints
-models/
-adapters/
-.models/
-*.gguf
-*.bin
-*.safetensors
-*.pt
-*.pth
-*.ckpt
-*.onnx
-*.engine
-
-# Local telemetry database engine
+*.pyc
 data/
-*.db
-*.db-journal
-*.sqlite
-*.sqlite3
-
-# Runtime logs
-logs/
-*.log
-
-# Local benchmark outputs
-runs/
-benchmarks/output/
+traces/

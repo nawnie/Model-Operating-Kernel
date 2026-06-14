@@ -1,7 +1,5 @@
-"""Model Operating Kernel core package.
+"""Model Operating Kernel starter package."""
 
-MOK coordinates split loading, offloading, routing, and execution across multiple
-specialized models under a shared local hardware budget.
-"""
+__all__ = ["__version__"]
 
 __version__ = "0.1.0"

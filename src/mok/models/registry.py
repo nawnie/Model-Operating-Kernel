@@ -1,127 +1,138 @@
-"""Model registry for MOK-managed expert assets.
-
-The registry is the source of truth for what expert models exist, what role each
-model serves, what backend owns it, and where the model currently lives in the
-local memory lifecycle.
-"""
-
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
-from time import time
-from typing import Any, Dict, List, Optional
+import json
+from pathlib import Path
 
-from pydantic import BaseModel, Field
-
-
-class AssetState(str, Enum):
-    """Hardware lifecycle state for a managed model asset."""
-
-    OFFLINE = "offline"  # On disk.
-    STAGED = "staged"  # Paged into system RAM.
-    RESIDENT = "resident"  # Permanent in VRAM, reserved for the core coordinator.
-    ACTIVE = "active"  # In VRAM and currently executing.
-    IDLE = "idle"  # In VRAM but waiting; eligible for eviction.
+from mok.models.gguf import GGUFInspection, inspect_gguf_file
 
 
-class ExpertMetadata(BaseModel):
-    """Metadata and live placement state for one expert model."""
+class ExpertState(str, Enum):
+    OFFLINE = "offline"
+    STAGED = "staged"
+    RESIDENT = "resident"
+    ACTIVE = "active"
+    IDLE = "idle"
 
+
+@dataclass(slots=True)
+class ExpertMetadata:
     name: str
     role: str
+    kind: str
     backend: str
-    api_url: str
-    vram_cost_gb: float = Field(..., description="Estimated VRAM footprint when active")
-    ram_cost_gb: float = Field(..., description="Estimated system RAM footprint when staged")
-    state: AssetState = AssetState.OFFLINE
-    current_device: str = "cpu"
+    api_url: str | None
+    base_id: str | None
+    adapter_path: str | None
+    vram_cost_gb: float
+    ram_cost_gb: float
+    current_device: str
+    state: ExpertState
+    model_path: str | None = None
+    file_format: str | None = None
+    architecture: str | None = None
+    quantization: str | None = None
+    context_limit: int = 8192
+    trust_score: float = 1.0
+    load_sequence: int = 0
 
-    # Runtime scheduling metadata. These values let the budget manager make
-    # eviction decisions without guessing or mutating state too early.
-    pinned: bool = False
-    can_evict: bool = True
-    priority: int = 100
-    loaded_at: Optional[float] = None
-    last_used_at: Optional[float] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "ExpertMetadata":
+        return cls(
+            name=str(data["name"]),
+            role=str(data["role"]),
+            kind=str(data["kind"]),
+            backend=str(data["backend"]),
+            api_url=data.get("api_url") if data.get("api_url") else None,
+            base_id=data.get("base_id") if data.get("base_id") else None,
+            adapter_path=data.get("adapter_path") if data.get("adapter_path") else None,
+            vram_cost_gb=float(data["vram_cost_gb"]),
+            ram_cost_gb=float(data["ram_cost_gb"]),
+            current_device=str(data.get("current_device", "cpu")),
+            state=ExpertState(str(data["state"])),
+            model_path=data.get("model_path") if data.get("model_path") else None,
+            file_format=data.get("file_format") if data.get("file_format") else None,
+            architecture=data.get("architecture") if data.get("architecture") else None,
+            quantization=data.get("quantization") if data.get("quantization") else None,
+            context_limit=int(data.get("context_limit", 8192)),
+            trust_score=float(data.get("trust_score", 1.0)),
+        )
+
+    @property
+    def is_loaded(self) -> bool:
+        return self.state in {
+            ExpertState.STAGED,
+            ExpertState.RESIDENT,
+            ExpertState.ACTIVE,
+            ExpertState.IDLE,
+        }
+
+    def hydrate_from_local_artifact(self) -> None:
+        if self.file_format != "gguf" or not self.model_path:
+            return
+        path = Path(self.model_path)
+        if not path.exists():
+            return
+        inspection = inspect_gguf_file(path)
+        self._apply_gguf_inspection(inspection)
+
+    def _apply_gguf_inspection(self, inspection: GGUFInspection) -> None:
+        if not self.architecture and inspection.architecture:
+            self.architecture = inspection.architecture
+        if not self.quantization and inspection.quantization_label:
+            self.quantization = inspection.quantization_label
+        if self.context_limit == 8192 and inspection.context_length:
+            self.context_limit = inspection.context_length
 
 
 class ModelRegistry:
-    """In-memory registry for expert model metadata and lifecycle state."""
+    def __init__(self, experts: list[ExpertMetadata]) -> None:
+        self._experts = {expert.name: expert for expert in experts}
+        for expert in self._experts.values():
+            expert.hydrate_from_local_artifact()
+        sequence = 0
+        for expert in self._experts.values():
+            if expert.is_loaded:
+                sequence += 1
+                expert.load_sequence = sequence
+        self._sequence = sequence
 
-    def __init__(self) -> None:
-        self._experts: Dict[str, ExpertMetadata] = {}
+    @classmethod
+    def from_json(cls, path: Path) -> "ModelRegistry":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        experts = [ExpertMetadata.from_dict(item) for item in payload["experts"]]
+        return cls(experts)
 
-    def register_expert(self, expert: ExpertMetadata) -> None:
-        """Register or replace an expert.
-
-        RESIDENT experts are treated as protected core assets by default. They
-        are pinned and marked non-evictable unless the caller explicitly changes
-        them later.
-        """
-
-        if expert.state == AssetState.RESIDENT:
-            expert.pinned = True
-            expert.can_evict = False
-            if expert.loaded_at is None:
-                expert.loaded_at = time()
-            if expert.last_used_at is None:
-                expert.last_used_at = expert.loaded_at
-        self._experts[expert.name] = expert
-
-    def get_expert(self, name: str) -> Optional[ExpertMetadata]:
-        return self._experts.get(name)
-
-    def list_experts(self) -> List[ExpertMetadata]:
+    def all(self) -> list[ExpertMetadata]:
         return list(self._experts.values())
 
-    def get_experts_by_state(self, state: AssetState) -> List[ExpertMetadata]:
-        return [expert for expert in self._experts.values() if expert.state == state]
+    def get(self, name: str) -> ExpertMetadata:
+        return self._experts[name]
 
-    def update_state(self, name: str, state: AssetState, device: str) -> None:
-        """Update lifecycle state and device placement for an expert."""
+    def find_first_by_role(self, role: str) -> ExpertMetadata | None:
+        for expert in self._experts.values():
+            if expert.role == role:
+                return expert
+        return None
 
-        expert = self._experts.get(name)
-        if expert is None:
-            return
-
-        now = time()
+    def promote(self, name: str, state: ExpertState) -> ExpertMetadata:
+        expert = self.get(name)
+        if not expert.is_loaded:
+            self._sequence += 1
+            expert.load_sequence = self._sequence
         expert.state = state
-        expert.current_device = device
+        expert.current_device = "cuda"
+        return expert
 
-        if state in {AssetState.RESIDENT, AssetState.ACTIVE, AssetState.IDLE}:
-            if expert.loaded_at is None:
-                expert.loaded_at = now
-            expert.last_used_at = now
+    def mark_idle(self, name: str) -> ExpertMetadata:
+        expert = self.get(name)
+        if expert.role != "coordinator":
+            expert.state = ExpertState.IDLE
+        return expert
 
-        if state == AssetState.OFFLINE:
-            expert.loaded_at = None
-            expert.current_device = "cpu"
-
-        if state == AssetState.RESIDENT:
-            expert.pinned = True
-            expert.can_evict = False
-
-    def mark_used(self, name: str) -> None:
-        """Refresh an expert's last-used timestamp without changing its state."""
-
-        expert = self._experts.get(name)
-        if expert is not None:
-            expert.last_used_at = time()
-
-    def get_eviction_candidates(self) -> List[ExpertMetadata]:
-        """Return IDLE experts that may be evicted, oldest and lowest priority first."""
-
-        candidates = [
-            expert
-            for expert in self.get_experts_by_state(AssetState.IDLE)
-            if expert.can_evict and not expert.pinned
-        ]
-        return sorted(
-            candidates,
-            key=lambda expert: (
-                expert.priority,
-                expert.last_used_at if expert.last_used_at is not None else 0.0,
-                expert.name,
-            ),
-        )
+    def evict(self, name: str) -> ExpertMetadata:
+        expert = self.get(name)
+        expert.state = ExpertState.OFFLINE
+        expert.current_device = "cpu"
+        return expert

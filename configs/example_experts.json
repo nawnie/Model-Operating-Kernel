@@ -1,48 +1,64 @@
 {
-  "hardware_budget": {
-    "max_vram_gb": 14.5,
-    "landing_zone_gb": 3.5
-  },
   "experts": [
     {
       "name": "core",
       "role": "coordinator",
-      "backend": "mock",
-      "api_url": "mock://core",
+      "kind": "full",
+      "backend": "local",
+      "api_url": null,
+      "base_id": null,
+      "adapter_path": null,
       "vram_cost_gb": 3.0,
-      "ram_cost_gb": 4.0,
+      "ram_cost_gb": 6.0,
+      "current_device": "cuda",
       "state": "resident",
-      "current_device": "cuda:0"
+      "context_limit": 8192,
+      "trust_score": 1.0
     },
     {
       "name": "coder",
-      "role": "code generation",
-      "backend": "mock",
-      "api_url": "mock://coder",
-      "vram_cost_gb": 4.0,
-      "ram_cost_gb": 6.0,
-      "state": "offline",
-      "current_device": "cpu"
+      "role": "code",
+      "kind": "adapter",
+      "backend": "vllm",
+      "api_url": null,
+      "base_id": "shared-text-base",
+      "adapter_path": "models/adapters/coder",
+      "vram_cost_gb": 0.2,
+      "ram_cost_gb": 0.5,
+      "current_device": "cuda",
+      "state": "idle",
+      "context_limit": 8192,
+      "trust_score": 1.0
     },
     {
       "name": "instruct",
-      "role": "general instruction following",
-      "backend": "mock",
-      "api_url": "mock://instruct",
-      "vram_cost_gb": 3.5,
-      "ram_cost_gb": 5.0,
-      "state": "offline",
-      "current_device": "cpu"
+      "role": "general",
+      "kind": "adapter",
+      "backend": "vllm",
+      "api_url": null,
+      "base_id": "shared-text-base",
+      "adapter_path": "models/adapters/instruct",
+      "vram_cost_gb": 0.2,
+      "ram_cost_gb": 0.5,
+      "current_device": "cuda",
+      "state": "idle",
+      "context_limit": 8192,
+      "trust_score": 1.0
     },
     {
       "name": "vision",
-      "role": "image understanding",
-      "backend": "mock",
-      "api_url": "mock://vision",
-      "vram_cost_gb": 5.5,
-      "ram_cost_gb": 7.5,
+      "role": "vision",
+      "kind": "full",
+      "backend": "local",
+      "api_url": null,
+      "base_id": null,
+      "adapter_path": null,
+      "vram_cost_gb": 6.0,
+      "ram_cost_gb": 8.0,
+      "current_device": "cpu",
       "state": "offline",
-      "current_device": "cpu"
+      "context_limit": 4096,
+      "trust_score": 1.0
     }
   ]
 }

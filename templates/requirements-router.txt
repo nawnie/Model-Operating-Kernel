@@ -1,0 +1,8 @@
+# Router training and export
+torch
+transformers
+sentence-transformers
+scikit-learn
+numpy
+onnx
+onnxruntime

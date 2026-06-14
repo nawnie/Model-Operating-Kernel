@@ -1,0 +1,56 @@
+{
+  "experts": [
+    {
+      "name": "core",
+      "role": "coordinator",
+      "kind": "full",
+      "backend": "local",
+      "api_url": null,
+      "base_id": null,
+      "adapter_path": null,
+      "vram_cost_gb": 3.0,
+      "ram_cost_gb": 6.0,
+      "current_device": "cuda",
+      "state": "resident"
+    },
+    {
+      "name": "coder",
+      "role": "code",
+      "kind": "adapter",
+      "backend": "vllm",
+      "api_url": null,
+      "base_id": "shared-text-base",
+      "adapter_path": "models/adapters/coder",
+      "vram_cost_gb": 0.2,
+      "ram_cost_gb": 0.5,
+      "current_device": "cuda",
+      "state": "idle"
+    },
+    {
+      "name": "instruct",
+      "role": "general",
+      "kind": "adapter",
+      "backend": "vllm",
+      "api_url": null,
+      "base_id": "shared-text-base",
+      "adapter_path": "models/adapters/instruct",
+      "vram_cost_gb": 0.2,
+      "ram_cost_gb": 0.5,
+      "current_device": "cuda",
+      "state": "idle"
+    },
+    {
+      "name": "vision",
+      "role": "multimodal",
+      "kind": "full",
+      "backend": "local",
+      "api_url": null,
+      "base_id": null,
+      "adapter_path": null,
+      "vram_cost_gb": 6.0,
+      "ram_cost_gb": 8.0,
+      "current_device": "cpu",
+      "state": "offline"
+    }
+  ]
+}

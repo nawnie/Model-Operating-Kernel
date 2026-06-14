@@ -1,0 +1,10 @@
+# Shared-base LoRA and coordinator training
+torch
+transformers
+datasets
+accelerate
+peft
+trl
+bitsandbytes
+sentencepiece
+safetensors
