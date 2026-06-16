@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 from pathlib import Path
+from typing import Any
 
 from mok.models.gguf import GGUFInspection, inspect_gguf_file
 
@@ -14,6 +15,28 @@ class ExpertState(str, Enum):
     RESIDENT = "resident"
     ACTIVE = "active"
     IDLE = "idle"
+
+
+
+@dataclass
+class VRAMProfile:
+    """
+    VRAM cost descriptor for a single expert.
+
+    ``static_gb``        : from config — used when no measured data available.
+    ``measured_peak_gb`` : observed peak during a real forward pass (from
+                           telemetry).  Used by BudgetManager when set.
+    ``activation_gb``    : peak delta during the forward pass itself (may
+                           spike above resident cost).
+    """
+    static_gb: float
+    measured_peak_gb: float | None = None
+    activation_gb: float | None = None
+
+    @property
+    def effective_gb(self) -> float:
+        """Return measured_peak_gb if available, else static_gb."""
+        return self.measured_peak_gb if self.measured_peak_gb is not None else self.static_gb
 
 
 @dataclass(slots=True)
@@ -36,6 +59,7 @@ class ExpertMetadata:
     context_limit: int = 8192
     trust_score: float = 1.0
     load_sequence: int = 0
+    vram_profile: VRAMProfile | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "ExpertMetadata":
@@ -84,6 +108,27 @@ class ExpertMetadata:
             self.quantization = inspection.quantization_label
         if self.context_limit == 8192 and inspection.context_length:
             self.context_limit = inspection.context_length
+
+    def hydrate_from_ollama(self, ollama_models: list[dict[str, Any]]) -> None:
+        """
+        Enrich metadata from an /api/tags model entry if this expert matches.
+
+        ollama_models: the list under the 'models' key returned by GET /api/tags.
+        Each entry looks like:
+          {"name": "qwen2.5:7b", "details": {"parameter_size": "7B", ...}, ...}
+        """
+        if self.backend != "ollama" or not self.base_id:
+            return
+        tag = self.base_id
+        for entry in ollama_models:
+            if entry.get("name") == tag:
+                details = entry.get("details", {})
+                if not self.architecture:
+                    self.architecture = details.get("family") or details.get("architecture")
+                if not self.quantization:
+                    self.quantization = details.get("quantization_level")
+                # Ollama doesn't expose context_length in /api/tags — leave as-is
+                break
 
 
 class ModelRegistry:
@@ -136,3 +181,35 @@ class ModelRegistry:
         expert.state = ExpertState.OFFLINE
         expert.current_device = "cpu"
         return expert
+
+    def hydrate_from_ollama_server(
+        self,
+        base_url: str = "http://localhost:11434",
+        timeout: float = 5.0,
+    ) -> int:
+        """
+        Query the running Ollama server at base_url for its model list and
+        enrich any matching expert metadata entries.
+
+        Returns the number of experts that were updated.
+        Never raises -- logs silently on connection errors.
+        """
+        import json
+        from urllib import request as urlrequest
+        from urllib.error import URLError, HTTPError
+
+        try:
+            req = urlrequest.Request(base_url.rstrip("/") + "/api/tags", method="GET")
+            with urlrequest.urlopen(req, timeout=timeout) as resp:
+                data: dict = json.loads(resp.read().decode("utf-8"))
+        except (URLError, HTTPError, OSError, json.JSONDecodeError):
+            return 0
+
+        models: list[dict] = data.get("models", [])
+        updated = 0
+        for expert in self._experts.values():
+            before = (expert.architecture, expert.quantization)
+            expert.hydrate_from_ollama(models)
+            if (expert.architecture, expert.quantization) != before:
+                updated += 1
+        return updated

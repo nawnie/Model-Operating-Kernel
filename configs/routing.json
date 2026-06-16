@@ -1,0 +1,28 @@
+{
+  "_comment": "Routing fallback chains — consumed by R0 RulesRouter and (future) R1 coordinator.",
+  "_version": "1",
+
+  "fallback_chains": {
+    "vision": ["vision", "general", "coordinator"],
+    "code":   ["code",   "general", "coordinator"],
+    "general":["general","coordinator", "code"],
+    "coordinator": ["coordinator", "general"]
+  },
+
+  "circuit_breaker": {
+    "failure_threshold": 3,
+    "reset_seconds": 60,
+    "half_open_probe_count": 1
+  },
+
+  "confidence_thresholds": {
+    "R0_high":   0.85,
+    "R0_medium": 0.65,
+    "R1_escalate_below": 0.60
+  },
+
+  "tier_escalation": {
+    "R0_to_R1_below_confidence": 0.60,
+    "R1_to_R2_enabled": false
+  }
+}

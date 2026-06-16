@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "Shared-base model configuration — P3.3.",
+    "When multiple experts use the same base weights (e.g. Qwen2.5-7B), the base",
+    "is loaded once and adapters (LoRA) are swapped in/out per request.",
+    "This is more VRAM-efficient than loading each expert's full weights separately.",
+    "",
+    "adapter_slots: max number of LoRA adapters resident simultaneously.",
+    "adapter_vram_gb: VRAM cost per loaded adapter (typically 0.1–0.5 GB for 4-bit LoRA).",
+    "base_vram_cost_gb: VRAM for the frozen base model alone (no adapters)."
+  ],
+  "shared_base": {
+    "model_id": "qwen2.5-7b-instruct",
+    "quantization": "Q4_K_M",
+    "context_length": 32768,
+    "base_vram_cost_gb": 4.5,
+    "adapter_slots": 4,
+    "adapter_vram_gb": 0.25,
+    "architecture": "qwen2",
+    "parameter_count_b": 7.6,
+    "source": {
+      "ollama_tag": "qwen2.5:7b",
+      "hf_repo": "Qwen/Qwen2.5-7B-Instruct",
+      "gguf_filename": "qwen2.5-7b-instruct-q4_k_m.gguf"
+    }
+  },
+  "adapters": [
+    {
+      "_comment": "Coding specialist adapter — routes from 'code' role.",
+      "adapter_id": "coder-lora",
+      "role": "code",
+      "base_model_id": "qwen2.5-7b-instruct",
+      "adapter_path": null,
+      "vram_cost_gb": 0.25,
+      "description": "Code generation, debugging, refactoring. Trained on coding traces.",
+      "state": "placeholder"
+    },
+    {
+      "_comment": "Instruction-following adapter — routes from 'general' role.",
+      "adapter_id": "instruct-lora",
+      "role": "general",
+      "base_model_id": "qwen2.5-7b-instruct",
+      "adapter_path": null,
+      "vram_cost_gb": 0.25,
+      "description": "General instruction following, Q&A, summarization.",
+      "state": "placeholder"
+    }
+  ]
+}

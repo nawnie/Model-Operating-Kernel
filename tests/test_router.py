@@ -1,27 +1,23 @@
 from pathlib import Path
 
+import pytest
+
 from mok.models.backends import RequestPayload
 from mok.models.registry import ModelRegistry
 from mok.routing.router import RulesRouter
 
 
-def build_registry() -> ModelRegistry:
-    return ModelRegistry.from_json(
-        Path(r"C:\Users\Shawn\Desktop\MoK-Project\configs\example_experts.json")
-    )
-
-
-def test_router_selects_coder_for_code_prompt() -> None:
+def test_router_selects_coder_for_code_prompt(config_path: Path) -> None:
     route = RulesRouter().route(
         RequestPayload(prompt="write a python function to sort a list"),
-        build_registry(),
+        ModelRegistry.from_json(config_path),
     )
     assert route.expert_name == "coder"
 
 
-def test_router_selects_vision_for_image_requests() -> None:
+def test_router_selects_vision_for_image_requests(config_path: Path) -> None:
     route = RulesRouter().route(
         RequestPayload(prompt="describe this screenshot", modality_flags={"has_image": True}),
-        build_registry(),
+        ModelRegistry.from_json(config_path),
     )
     assert route.expert_name == "vision"

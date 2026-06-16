@@ -1,76 +1,117 @@
 # Model Operating Kernel (MoK)
 
-Model Operating Kernel is a local-first runtime scaffold for coordinating multiple model and expert backends on consumer hardware.
+Model Operating Kernel is a local-first runtime for coordinating multiple model and expert backends on consumer hardware.
 
-MoK explores a practical model-orchestration layer: expert registration, route selection, VRAM budgeting, backend invocation, trace logging, and evaluation records. The current repository is an early buildable slice, not the final architecture.
+MoK is not an in-model Mixture-of-Experts implementation. It is a runtime coordination layer: it registers experts, selects routes, manages VRAM pressure, invokes local or HTTP-backed models, records traces, and feeds evaluation data back into routing improvements.
+
+The repository is an early but runnable slice of the larger design. The priority is a stable contract between routing, budgeting, memory, telemetry, and backend execution before heavier training and serving work is added.
 
 ## Current Status
 
-This repo contains both research notes and a runnable starter codebase. The implementation is intentionally small so the routing, budgeting, and trace contracts can be tested before heavier model-serving work is added.
+The current runtime includes:
+
+- expert registry with lifecycle state
+- VRAM budget accounting and idle-expert eviction
+- rule-based `R0` routing
+- learned-router scaffolding
+- per-expert circuit breakers
+- mock, HTTP, Ollama, and llama.cpp-style backends
+- GGUF metadata inspection
+- JSONL trace logging
+- oracle scoring and training-pair export
+- smoke evaluation harnesses
+- companion runtime and terminal controls
+
+The next operational goal is to collect real local traces, measure actual VRAM behavior, and validate routing quality against repeatable eval sets.
 
 ## Repository Layout
 
-- `docs/` - project, architecture, training, roadmap, and kickoff documents.
-- `sources/` - original source material plus extracted text where available.
-- `templates/` - future-file templates kept for reference.
-- `src/mok/` - initial Python package.
-- `configs/` - example expert registry configuration.
-- `tests/` - basic unit tests for the first runtime slice.
+```text
+configs/       runtime and expert configuration
+docs/          architecture, training, roadmap, and research notes
+evaluation/    smoke prompts, oracle labels, and eval runners
+sources/       source material and OCR extraction
+src/mok/       Python package
+templates/     starter config and dependency templates
+tests/         unit and integration tests
+run_mok.py     command entrypoint
+```
 
-## Starter Runtime
-
-The current runtime slice includes:
-
-- expert registry with lifecycle states;
-- simple VRAM budget manager with idle-expert eviction;
-- `R0` rules router;
-- mock backend plus HTTP backend stub;
-- runtime loop from prompt to route to budget to backend to trace;
-- JSONL trace logging;
-- oracle-regret skeleton for later evaluation work;
-- GGUF metadata inspection without loading models for inference.
+Generated traces, private training data, local datasets, and model assets should stay out of version control.
 
 ## Quick Start
 
 ```powershell
-python -m pip install pytest
+cd C:\Users\Shawn\Desktop\MoK-Project
+python -m pip install -e .
 python -m pytest -q
 python run_mok.py "write Python to reverse a list"
+```
+
+Useful local commands:
+
+```powershell
 python run_mok.py --has-image "describe this screenshot"
 python run_mok.py --inspect-gguf "C:\path\to\model.gguf"
 python run_mok.py --scan-gguf-dir "C:\path\to\models"
+python run_mok.py --config configs\real_experts.json "write Python to reverse a list"
 ```
 
-## Design Goals
+## Runtime Design
 
-MoK is being built around a few core contracts:
+MoK is built around a few core contracts:
 
-- keep expert metadata explicit and machine-readable;
-- separate routing decisions from backend execution;
-- treat VRAM as a managed budget, not an accident;
-- record traces so route decisions can be replayed and evaluated;
-- allow local models, HTTP backends, adapters, and future multimodal experts to share one invocation contract.
+- expert metadata stays explicit and machine-readable
+- routing decisions are separate from backend execution
+- VRAM is treated as a managed budget
+- every request can produce trace data for replay and evaluation
+- local models, HTTP backends, adapters, and future multimodal experts share one invocation contract
+
+Configured backend keys:
+
+- `mock`: no-server backend for tests and dry runs
+- `http`: generic JSON HTTP backend
+- `ollama`: Ollama `/api/generate` backend using `base_id` as the model tag
+- `llama_cpp`: OpenAI-compatible chat backend for `llama-server` or `llama-cpp-python`
+- `vllm`: reserved for later high-throughput serving work
+
+The default local coordinator/general model is `mok-core:1b`, built from `configs/ollama/Modelfile.mok-core-1b` around `gemma3:1b`.
+
+## Evaluation
+
+Run the local MoK Core smoke set:
+
+```powershell
+python evaluation\run_mok_core_smoke.py
+```
+
+The smoke runner checks route choice and behavior cues such as project-file safety, tool-result skepticism, and current-information handling. Results and traces are written under `traces/`.
+
+## Companion Runtime
+
+The companion process is a lightweight interface for a small local MoK assistant. It can be controlled from the command layer while the runtime remains separate from the terminal UI.
+
+Common lifecycle commands:
+
+```powershell
+mok wakeup
+mok sleep
+python run_mok.py companion lifecycle
+```
 
 ## GGUF Support
 
-The starter can inspect GGUF model files without loading them for inference. This is useful for:
+MoK can inspect GGUF files without loading them for inference. This is used for:
 
-- reading architecture and context length from local GGUF assets;
-- identifying quantization type;
-- scanning a model directory to catalog local executors;
-- hydrating registry entries that point at GGUF files.
+- reading architecture metadata
+- checking context length
+- identifying quantization
+- scanning local model directories
+- hydrating registry entries from local model assets
 
-## Near-Term Roadmap
+## Development Checks
 
-The next development targets are:
-
-- a stable route schema;
-- richer trace fields;
-- failure recovery for timeouts, malformed output, tool failure, and memory pressure;
-- replay evaluation over actual expert outputs;
-- stronger expert registry validation;
-- backend integration beyond the current mock and HTTP stub paths.
-
-## Project Boundary
-
-MoK is not an in-model Mixture-of-Experts implementation. It is a runtime coordination layer that decides which external expert, model, adapter, or backend should handle a request, then records what happened so the system can be improved safely.
+```powershell
+python -m pytest -q
+python evaluation\run_mok_core_smoke.py
+```

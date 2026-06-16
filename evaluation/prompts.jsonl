@@ -1,0 +1,20 @@
+{"request_id": "eval-001", "prompt": "Write a Python function that sorts a list of integers using merge sort.", "expected_role": "code"}
+{"request_id": "eval-002", "prompt": "Explain the difference between a stack and a queue data structure.", "expected_role": "general"}
+{"request_id": "eval-003", "prompt": "Debug this Python traceback: AttributeError: 'NoneType' object has no attribute 'split'", "expected_role": "code"}
+{"request_id": "eval-004", "prompt": "What is the capital of France and what is its population?", "expected_role": "general"}
+{"request_id": "eval-005", "prompt": "Describe what is happening in this image of a system architecture diagram.", "expected_role": "vision", "modality_flags": {"has_image": true}}
+{"request_id": "eval-006", "prompt": "Refactor this function to use list comprehensions instead of for loops.", "expected_role": "code"}
+{"request_id": "eval-007", "prompt": "Summarise the key points of this research paper on transformer attention mechanisms.", "expected_role": "general"}
+{"request_id": "eval-008", "prompt": "Write unit tests for a function that validates email addresses.", "expected_role": "code"}
+{"request_id": "eval-009", "prompt": "What are the main differences between REST and GraphQL APIs?", "expected_role": "general"}
+{"request_id": "eval-010", "prompt": "Identify all objects visible in this photo and describe their spatial relationships.", "expected_role": "vision", "modality_flags": {"has_image": true}}
+{"request_id": "eval-011", "prompt": "Implement a binary search tree with insert, search, and delete operations.", "expected_role": "code"}
+{"request_id": "eval-012", "prompt": "How does gradient descent work in neural network training?", "expected_role": "general"}
+{"request_id": "eval-013", "prompt": "Fix the off-by-one error in this loop that processes array elements.", "expected_role": "code"}
+{"request_id": "eval-014", "prompt": "Describe the pros and cons of microservices architecture.", "expected_role": "general"}
+{"request_id": "eval-015", "prompt": "Parse and extract all function definitions from this Python source file.", "expected_role": "code"}
+{"request_id": "eval-016", "prompt": "What are the ethical implications of large language models in healthcare?", "expected_role": "general"}
+{"request_id": "eval-017", "prompt": "Convert this SQL query to use window functions instead of subqueries.", "expected_role": "code"}
+{"request_id": "eval-018", "prompt": "Explain how transformer positional encodings work.", "expected_role": "general"}
+{"request_id": "eval-019", "prompt": "Write a regex pattern to match ISO 8601 date strings.", "expected_role": "code"}
+{"request_id": "eval-020", "prompt": "What are the trade-offs between synchronous and asynchronous programming?", "expected_role": "general"}

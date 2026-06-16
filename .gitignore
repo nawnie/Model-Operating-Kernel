@@ -1,5 +1,11 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+*.pyo
+.coverage
+htmlcov/
+src/*.egg-info/
 data/
+datasets/
 traces/
+training/

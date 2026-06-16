@@ -20,7 +20,13 @@ class TraceEvent:
     backend_latency_ms: int
     vram_pressure_gb: float
     success: bool
+    # v1 additions
+    router_tier: str = "R0"
+    fallback_chain: list[str] = field(default_factory=list)
+    error_type: str | None = None   # None | "backend_error" | "budget_exhausted" | "routing_error" | "no_backend" | "internal_error"
+    prompt_tokens: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
+    vram_peak_gb: float | None = None  # measured peak from telemetry (P5.3)
 
 
 class JsonlTraceLogger:
@@ -30,5 +36,5 @@ class JsonlTraceLogger:
 
     def log(self, event: TraceEvent) -> None:
         payload = asdict(event)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, sort_keys=True) + "\n")
+        with self.path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, sort_keys=True) + "\n")
