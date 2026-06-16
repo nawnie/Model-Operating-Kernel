@@ -107,6 +107,7 @@ def install_startup_tasks(config_path: Path = DEFAULT_CONFIG_PATH) -> dict:
         write_startup_folder_entries(scripts)
         scheduler_error = str(exc)
     else:
+        remove_watch_startup_entry()
         scheduler_error = ""
     return {
         "method": method,
@@ -147,6 +148,12 @@ def remove_llama_startup_entry() -> None:
         text=True,
     )
     path = startup_folder() / LLAMA_STARTUP_NAME
+    if path.exists():
+        path.unlink()
+
+
+def remove_watch_startup_entry() -> None:
+    path = startup_folder() / WATCH_STARTUP_NAME
     if path.exists():
         path.unlink()
 
