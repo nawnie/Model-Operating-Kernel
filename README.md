@@ -1,5 +1,12 @@
 # Model Operating Kernel (MoK)
 
+[![Pytest](https://github.com/nawnie/Model-Operating-Kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/nawnie/Model-Operating-Kernel/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Status](https://img.shields.io/badge/status-early%20runnable%20slice-yellow)
+![Runtime](https://img.shields.io/badge/runtime-local--first-brightgreen)
+![Target](https://img.shields.io/badge/target-consumer%20hardware-lightgrey)
+![MoE](https://img.shields.io/badge/MoE-runtime%20orchestration-informational)
+
 Model Operating Kernel is a local-first runtime for coordinating multiple model and expert backends on consumer hardware.
 
 MoK is not an in-model Mixture-of-Experts implementation. It is a runtime coordination layer: it registers experts, selects routes, manages VRAM pressure, invokes local or HTTP-backed models, records traces, and feeds evaluation data back into routing improvements.
