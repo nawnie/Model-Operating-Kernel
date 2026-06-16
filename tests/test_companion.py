@@ -11,6 +11,7 @@ from mok.companion.observer import observe_files
 from mok.companion.startup import write_startup_scripts
 from mok.companion.storage import DatacardStore
 from mok.companion.control import state_label
+from mok.companion.cli import format_lifecycle_result
 from mok.companion.terminal import format_lifecycle, format_status
 from mok.companion.wakeup import build_wakeup_prompt, fallback_wakeup_note
 
@@ -122,6 +123,31 @@ def test_cli_accepts_lifecycle_commands() -> None:
         args = parser.parse_args(["companion", command])
         assert args.command == "companion"
         assert args.companion_command == command
+
+
+def test_cli_accepts_lifecycle_json_flag() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["companion", "wakeup", "--json"])
+
+    assert args.companion_command == "wakeup"
+    assert args.json is True
+
+
+def test_wakeup_lifecycle_output_hides_process_details() -> None:
+    text = format_lifecycle_result(
+        "wakeup",
+        {
+            "state": "running",
+            "server_running": True,
+            "watcher_running": True,
+            "server": [{"pid": 1, "command_line": "llama-server.exe --model secret.gguf"}],
+            "wakeup_note": "Back online.",
+        },
+    )
+
+    assert text == "Back online."
+    assert "command_line" not in text
+    assert "llama-server" not in text
 
 
 def test_terminal_status_format() -> None:

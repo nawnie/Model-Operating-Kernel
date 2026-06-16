@@ -98,9 +98,9 @@ def write_startup_scripts(
 def install_startup_tasks(config_path: Path = DEFAULT_CONFIG_PATH) -> dict:
     config = CompanionConfig.load(config_path)
     scripts = write_startup_scripts(config, config_path=config_path)
+    remove_llama_startup_entry()
     method = "task_scheduler"
     try:
-        register_task(LLAMA_TASK_NAME, scripts.llama_script)
         register_task(WATCH_TASK_NAME, scripts.watch_script)
     except RuntimeError as exc:
         method = "startup_folder"
@@ -110,12 +110,13 @@ def install_startup_tasks(config_path: Path = DEFAULT_CONFIG_PATH) -> dict:
         scheduler_error = ""
     return {
         "method": method,
-        "llama_task": LLAMA_TASK_NAME,
+        "llama_task": None,
         "watch_task": WATCH_TASK_NAME,
         "llama_script": str(scripts.llama_script),
         "watch_script": str(scripts.watch_script),
         "log_dir": str(scripts.log_dir),
         "scheduler_error": scheduler_error,
+        "server_starts_on_login": False,
     }
 
 
@@ -137,6 +138,17 @@ def uninstall_startup_tasks() -> dict:
         else:
             results[name] = False
     return results
+
+
+def remove_llama_startup_entry() -> None:
+    subprocess.run(
+        ["schtasks", "/Delete", "/TN", LLAMA_TASK_NAME, "/F"],
+        capture_output=True,
+        text=True,
+    )
+    path = startup_folder() / LLAMA_STARTUP_NAME
+    if path.exists():
+        path.unlink()
 
 
 def startup_status() -> dict:
@@ -178,10 +190,7 @@ def register_task(task_name: str, script_path: Path) -> None:
 def write_startup_folder_entries(scripts: StartupScripts) -> None:
     startup = startup_folder()
     startup.mkdir(parents=True, exist_ok=True)
-    (startup / LLAMA_STARTUP_NAME).write_text(
-        startup_cmd_for(scripts.llama_script),
-        encoding="utf-8",
-    )
+    remove_llama_startup_entry()
     (startup / WATCH_STARTUP_NAME).write_text(
         startup_cmd_for(scripts.watch_script),
         encoding="utf-8",

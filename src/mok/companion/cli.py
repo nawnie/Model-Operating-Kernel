@@ -80,14 +80,18 @@ def add_companion_parser(subparsers: argparse._SubParsersAction) -> None:
     chat.add_argument("--limit", type=int, default=6)
 
     commands.add_parser("terminal", help="Open the standalone MoK terminal window.")
-    commands.add_parser("lifecycle", help="Print MoK runtime lifecycle status.")
-    commands.add_parser("start", help="Start llama.cpp server and companion watcher.")
-    commands.add_parser("wakeup", help="Alias for start.")
-    commands.add_parser("pause", help="Pause watcher while keeping model server available.")
-    commands.add_parser("resume", help="Resume watcher after pause.")
-    commands.add_parser("stop", help="Stop watcher and llama.cpp server.")
-    commands.add_parser("sleep", help="Alias for stop.")
-    commands.add_parser("restart", help="Restart watcher and llama.cpp server.")
+    for name, help_text in (
+        ("lifecycle", "Print MoK runtime lifecycle status."),
+        ("start", "Start llama.cpp server and companion watcher."),
+        ("wakeup", "Alias for start."),
+        ("pause", "Pause watcher while keeping model server available."),
+        ("resume", "Resume watcher after pause."),
+        ("stop", "Stop watcher and llama.cpp server."),
+        ("sleep", "Alias for stop."),
+        ("restart", "Restart watcher and llama.cpp server."),
+    ):
+        lifecycle = commands.add_parser(name, help=help_text)
+        lifecycle.add_argument("--json", action="store_true", help="Print raw lifecycle JSON.")
     commands.add_parser("install-startup", help="Install login startup tasks for server and watcher.")
     commands.add_parser("uninstall-startup", help="Remove login startup tasks.")
     startup = commands.add_parser("startup-status", help="Inspect startup task status.")
@@ -275,7 +279,11 @@ def handle_companion_command(args: argparse.Namespace) -> bool:
             "sleep": stop_mok,
             "restart": restart_mok,
         }
-        print(json.dumps(actions[args.companion_command](config_path), indent=2))
+        result = actions[args.companion_command](config_path)
+        if getattr(args, "json", False):
+            print(json.dumps(result, indent=2))
+        else:
+            print(format_lifecycle_result(args.companion_command, result))
         return True
 
     if args.companion_command == "install-startup":
@@ -354,3 +362,28 @@ def card_to_dict(card) -> dict:
         "created_at": card.created_at,
         "updated_at": card.updated_at,
     }
+
+
+def format_lifecycle_result(command: str, result: dict) -> str:
+    state = result.get("state", "unknown")
+    if command in {"wakeup", "start", "restart"}:
+        note = str(result.get("wakeup_note") or "").strip()
+        if note:
+            return note
+        if result.get("wakeup_note_error"):
+            return f"MoK is awake, but the wakeup note failed: {result['wakeup_note_error']}"
+        return f"MoK is {state}."
+    if command in {"sleep", "stop"}:
+        return "MoK is asleep. llama.cpp server and watcher are off."
+    if command == "pause":
+        return "MoK watcher is paused. llama.cpp server is still available."
+    if command == "resume":
+        return f"MoK watcher resumed. State: {state}."
+
+    parts = [
+        f"state={state}",
+        f"server_running={bool(result.get('server_running'))}",
+        f"watcher_running={bool(result.get('watcher_running'))}",
+        f"paused={bool(result.get('paused'))}",
+    ]
+    return "\n".join(parts)
