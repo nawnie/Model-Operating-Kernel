@@ -20,7 +20,7 @@ The source document is clear that nothing learned should be trained before there
 ### R0
 
 - keyword, regex, and modality detection
-- serves as the first runnable baseline
+- first runnable baseline
 - produces the first useful route traces
 
 ### R1
