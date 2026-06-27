@@ -7,11 +7,13 @@
 ![Target](https://img.shields.io/badge/target-consumer%20hardware-lightgrey)
 ![MoE](https://img.shields.io/badge/MoE-runtime%20orchestration-informational)
 
-Model Operating Kernel is a local-first runtime for coordinating multiple model and expert backends on consumer hardware.
+Model Operating Kernel is a local-first runtime for coordinating model and expert backends on consumer hardware.
 
-MoK is not an in-model Mixture-of-Experts implementation. It is a runtime coordination layer: it registers experts, selects routes, manages VRAM pressure, invokes local or HTTP-backed models, records traces, and feeds evaluation data back into routing improvements.
+MoK is not an in-model Mixture-of-Experts implementation. It is a runtime control layer: it registers experts, selects routes, manages VRAM pressure, invokes local or HTTP-backed models, records traces, and exports evaluation data for routing work.
 
-The repository is an early but runnable slice of the larger design. The priority is a stable contract between routing, budgeting, memory, telemetry, and backend execution before heavier training and serving work is added.
+The repository is an early runnable slice of the full design. It is meant to show the contracts that matter: routing, budgeting, memory, telemetry, and backend execution. Heavier training and serving work comes after those contracts stay stable under local tests.
+
+For reviewers, MoK is public proof of the control layer. It is not a claim that every planned training path is finished.
 
 ## Current Status
 
