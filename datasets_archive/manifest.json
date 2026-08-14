@@ -1,0 +1,194 @@
+{
+  "archive_name": "mok_dataset_archive",
+  "version": "0.1.0",
+  "phase": "phase_1_source_map",
+  "created_date": "2026-06-16",
+  "repository": "nawnie/Model-Operating-Kernel",
+  "branch": "phase-1-dataset-archive",
+  "goal": "Train MOK as a logic-first, tool-native, retrieval-aware researcher/coding operating model that prefers verified tool and source use over memorized subject content.",
+  "core_behavior": [
+    "detect unknown, unstable, niche, user-specific, or high-stakes facts",
+    "choose the right tool or retrieval path before guessing",
+    "inspect sources, tool outputs, files, tests, and traces",
+    "map findings into compact Cartographer-style source structures",
+    "retrieve and select Atlas/RAG evidence cards",
+    "verify claims and state evidence boundaries",
+    "write durable RAG notes only when useful and sourced",
+    "recover honestly from failed searches, failed tests, and missing evidence"
+  ],
+  "global_rules": {
+    "behavior_first": true,
+    "avoid_broad_factual_memorization": true,
+    "commit_bulk_private_or_generated_data": false,
+    "commit_allowed_artifacts": [
+      "manifests",
+      "schemas",
+      "source policies",
+      "small samples",
+      "generators",
+      "validators",
+      "eval runners",
+      "qc reports"
+    ],
+    "requires_license_metadata": true,
+    "requires_privacy_metadata": true,
+    "requires_contamination_split": true,
+    "hidden_chain_of_thought_as_target_style_allowed": false,
+    "chat_log_training_records_allowed": false,
+    "fake_citations_allowed": false
+  },
+  "files": [
+    {
+      "path": "research.md",
+      "purpose": "Phase 1 research notes and source map"
+    },
+    {
+      "path": "datasets_archive/README.md",
+      "purpose": "Archive usage guide and family overview"
+    },
+    {
+      "path": "datasets_archive/licenses_and_sources/source_policy.md",
+      "purpose": "Source, license, privacy, contamination, and redaction policy"
+    },
+    {
+      "path": "datasets_archive/schemas/README.md",
+      "purpose": "Phase 2 schema handoff"
+    }
+  ],
+  "dataset_families": [
+    {
+      "id": "01_logic_reasoning",
+      "name": "Logic and reasoning",
+      "status": "planned",
+      "target_behavior": "Track constraints, detect contradictions, check assumptions, produce concise reasoning summaries, and verify conclusions.",
+      "record_types": ["reasoning_trace", "proof_check", "constraint_task", "counterexample_task"],
+      "candidate_sources": ["synthetic_validated_tasks", "MATH_style_structure", "miniF2F_style_formal_tasks", "Tree_of_Thoughts_style_search_patterns"],
+      "default_split": "train_after_validation"
+    },
+    {
+      "id": "02_tool_use",
+      "name": "Tool use and routing",
+      "status": "planned",
+      "target_behavior": "Select appropriate tools, form valid calls, inspect observations, retry intelligently, and avoid unnecessary tool use.",
+      "record_types": ["tool_use_trace", "function_call", "tool_failure_recovery", "no_tool_needed_contrast"],
+      "candidate_sources": ["MOK_runtime_traces", "ToolBench_style_records", "BFCL_style_eval_patterns", "Gorilla_APIBench_style_records"],
+      "default_split": "train_after_license_and_validation"
+    },
+    {
+      "id": "03_research_workflows",
+      "name": "Research workflows",
+      "status": "planned",
+      "target_behavior": "Decompose research questions, plan searches, triage sources, build evidence matrices, and answer with citations and limits.",
+      "record_types": ["research_trace", "source_map", "claim_evidence_matrix", "gap_analysis"],
+      "candidate_sources": ["MOK_native_research_tasks", "GAIA_style_tasks", "WebArena_style_tasks", "AgentBench_style_tasks"],
+      "default_split": "train_for_generated_analogues_holdout_for_benchmarks"
+    },
+    {
+      "id": "04_coding_workflows",
+      "name": "Coding workflows",
+      "status": "planned",
+      "target_behavior": "Inspect repo state, reproduce bugs, plan minimal patches, run tests, and report results honestly.",
+      "record_types": ["coding_workflow", "patch_trace", "test_result", "review_summary"],
+      "candidate_sources": ["MOK_repo_tasks", "SWE_bench_style_tasks", "generated_bugfix_tasks"],
+      "default_split": "train_for_mok_native_holdout_for_public_benchmarks"
+    },
+    {
+      "id": "05_retrieval_atlas_cartographer",
+      "name": "Atlas / Cartographer / RAG behavior",
+      "status": "planned",
+      "target_behavior": "Use structured retrieval context, select evidence cards, reject distractors, map sources, and off-ramp when unsupported.",
+      "record_types": ["retrieval_record", "atlas_card_selection", "cartographer_map", "rag_answer_from_cards"],
+      "candidate_sources": ["Atlas_LoRA_patterns", "Cartographer_outputs", "Self_RAG_style_records", "RAGTruth_style_records"],
+      "default_split": "train_after_project_schema_defined"
+    },
+    {
+      "id": "06_verification_and_source_boundaries",
+      "name": "Verification and source boundaries",
+      "status": "planned",
+      "target_behavior": "Verify claims, handle conflicting evidence, state uncertainty, and avoid unsupported or uncited claims.",
+      "record_types": ["verifier_record", "source_conflict_record", "off_ramp_record", "claim_support_record"],
+      "candidate_sources": ["FActScore_style_atomic_facts", "FEVEROUS_style_support_labels", "RAGTruth_style_hallucination_labels"],
+      "default_split": "train_after_license_and_validation"
+    },
+    {
+      "id": "07_memory_writeback_and_learning",
+      "name": "Memory write-back and learning behavior",
+      "status": "planned",
+      "target_behavior": "React positively to unknowns, research them, write useful sourced RAG notes, and attach staleness policy.",
+      "record_types": ["memory_writeback_record", "learning_trigger", "retrieval_test", "staleness_policy"],
+      "candidate_sources": ["MOK_generated_learning_tasks", "Reflexion_style_memory_patterns", "Self_RAG_style_reflection_patterns"],
+      "default_split": "train_after_qc"
+    },
+    {
+      "id": "08_router_orchestration",
+      "name": "MOK runtime/router/oracle traces",
+      "status": "planned",
+      "target_behavior": "Improve MOK routing and orchestration from traces, oracle scores, fallback chains, and runtime outcomes.",
+      "record_types": ["trace_record", "router_training_pair", "oracle_score_record", "fallback_record"],
+      "candidate_sources": ["src/mok/telemetry/events.py", "src/mok/evaluation/oracle.py", "src/mok/evaluation/export.py", "evaluation/mok_core_smoke.jsonl"],
+      "default_split": "train_after_redaction"
+    },
+    {
+      "id": "09_failure_recovery",
+      "name": "Failure recovery and off-ramps",
+      "status": "planned",
+      "target_behavior": "Recover from tool, search, retrieval, and test failures while reporting partial evidence honestly.",
+      "record_types": ["failure_recovery_record", "retry_record", "partial_success_record", "missing_evidence_record"],
+      "candidate_sources": ["MOK_failure_traces", "ReAct_style_retry_patterns", "Reflexion_style_feedback_patterns"],
+      "default_split": "train_after_validation"
+    },
+    {
+      "id": "10_safety_privacy_project_discipline",
+      "name": "Safety, privacy, and project discipline",
+      "status": "planned",
+      "target_behavior": "Avoid private leakage, protect local projects, respect tool boundaries, and keep benchmark contamination controlled.",
+      "record_types": ["privacy_redaction_record", "project_safety_record", "contamination_policy_record", "high_stakes_boundary_record"],
+      "candidate_sources": ["MOK_smoke_scenarios", "Agent_SafetyBench_style_patterns", "project_redaction_tests"],
+      "default_split": "train_after_manual_review"
+    }
+  ],
+  "training_mix_recommendation": [
+    {"family": "02_tool_use", "weight": 0.20},
+    {"family": "03_research_workflows", "weight": 0.15},
+    {"family": "04_coding_workflows", "weight": 0.15},
+    {"family": "06_verification_and_source_boundaries", "weight": 0.15},
+    {"family": "05_retrieval_atlas_cartographer", "weight": 0.15},
+    {"family": "01_logic_reasoning", "weight": 0.10},
+    {"family": "08_router_orchestration", "weight": 0.05},
+    {"family": "07_memory_writeback_and_learning", "weight": 0.05}
+  ],
+  "source_policy": {
+    "path": "datasets_archive/licenses_and_sources/source_policy.md",
+    "raw_import_requires_license_audit": true,
+    "public_benchmark_default_split": "holdout_or_dev_until_approved",
+    "private_trace_default_status": "private_do_not_commit",
+    "redaction_required_for_traces": true
+  },
+  "open_gaps": [
+    {
+      "id": "gap_fable_5_source",
+      "description": "Fable 5 training source was requested as a precedent, but no separate repository was found during the connected GitHub search pass.",
+      "status": "needs_repo_or_archive_pointer"
+    },
+    {
+      "id": "gap_cartographer_schema",
+      "description": "Exact Cartographer output schema and RAG card fields need to be confirmed before Phase 2 schemas are finalized.",
+      "status": "needs_project_source"
+    },
+    {
+      "id": "gap_trace_redactor",
+      "description": "MOK trace redaction standard is drafted in policy, but implementation and tests are not yet built.",
+      "status": "phase_2_or_3"
+    }
+  ],
+  "phase_1_status": {
+    "research_notes": "created",
+    "archive_readme": "created",
+    "source_policy": "created",
+    "manifest": "created",
+    "schemas": "handoff_only",
+    "sample_records": "not_started",
+    "validators": "not_started",
+    "qc_reports": "not_started"
+  }
+}
